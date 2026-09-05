@@ -1,0 +1,52 @@
+# Full-stack compose: PostgreSQL + MinIO + API + worker + web.
+# The default local workflow (make dev) needs none of this; compose demonstrates the production shape.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: bearcase
+      POSTGRES_PASSWORD: bearcase
+      POSTGRES_DB: bearcase
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U bearcase"], interval: 5s, timeout: 3s, retries: 10 }
+    volumes: [pgdata:/var/lib/postgresql/data]
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment: { MINIO_ROOT_USER: bearcase, MINIO_ROOT_PASSWORD: bearcase123 }
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [minio:/data]
+  minio-init:
+    image: minio/mc:latest
+    depends_on: [minio]
+    entrypoint: ["/bin/sh", "-c", "sleep 3 && mc alias set local http://minio:9000 bearcase bearcase123 && mc mb -p local/bearcase || true"]
+  api:
+    build: { context: .., dockerfile: infra/api.Dockerfile }
+    environment: &api_env
+      BEARCASE_ENV: development
+      BEARCASE_SECRET_KEY: docker-dev-secret
+      BEARCASE_DATABASE_URL: postgresql+psycopg://bearcase:bearcase@db:5432/bearcase
+      BEARCASE_STORAGE_BACKEND: s3
+      BEARCASE_S3_BUCKET: bearcase
+      BEARCASE_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: bearcase
+      AWS_SECRET_ACCESS_KEY: bearcase123
+      BEARCASE_JOB_RUNNER: poll
+      BEARCASE_AI_PROVIDER: ${BEARCASE_AI_PROVIDER:-mock}
+      BEARCASE_ANTHROPIC_API_KEY: ${BEARCASE_ANTHROPIC_API_KEY:-}
+      BEARCASE_CORS_ORIGINS: '["http://localhost:3000"]'
+    command: ["bearcase", "serve", "--host", "0.0.0.0", "--port", "8000"]
+    ports: ["8000:8000"]
+    depends_on: { db: { condition: service_healthy }, minio-init: { condition: service_completed_successfully } }
+  worker:
+    build: { context: .., dockerfile: infra/api.Dockerfile }
+    environment: *api_env
+    command: ["bearcase", "worker"]
+    depends_on: [api]
+  web:
+    build: { context: .., dockerfile: infra/web.Dockerfile }
+    environment: { BEARCASE_API_URL: http://api:8000 }
+    ports: ["3000:3000"]
+    depends_on: [api]
+volumes:
+  pgdata: {}
+  minio: {}

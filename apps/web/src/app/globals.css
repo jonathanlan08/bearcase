@@ -1,0 +1,185 @@
+@import "tailwindcss";
+
+/* BearCase design tokens — see docs/design/design-system.md */
+@theme {
+  --color-ink-950: #07080a;
+  --color-ink-900: #0d0f12;
+  --color-ink-800: #15181d;
+  --color-ink-700: #1f242b;
+  --color-ink-600: #2c333c;
+  --color-graphite-500: #6b7480;
+  --color-graphite-400: #8a94a0;
+  --color-paper-0: #fbfaf7;
+  --color-paper-50: #f5f2ec;
+  --color-paper-100: #ece8e0;
+  --color-paper-200: #ddd8ce;
+  --color-signal-300: #a9ccff;
+  --color-signal-400: #7fb2ff;
+  --color-signal-600: #2b6cd9;
+  --color-signal-700: #1f55b3;
+  --color-amber-400: #e5a83b;
+  --color-amber-600: #b7791f;
+  --color-red-400: #e5644e;
+  --color-red-600: #b3261e;
+
+  --font-display: var(--font-instrument-serif), "Iowan Old Style", "Times New Roman", serif;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius-1: 2px;
+  --radius-2: 6px;
+  --radius-3: 10px;
+
+  --shadow-1: 0 1px 2px rgba(13, 15, 18, 0.06);
+  --shadow-2: 0 8px 24px rgba(13, 15, 18, 0.1);
+
+  --ease-std: cubic-bezier(0.2, 0, 0, 1);
+  --ease-reveal: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* Semantic surface tokens: Paper (app default) and Ink (site, app dark) */
+:root,
+[data-world="paper"] {
+  --bg: var(--color-paper-50);
+  --bg-raised: var(--color-paper-0);
+  --bg-muted: var(--color-paper-100);
+  --fg: var(--color-ink-900);
+  --fg-muted: var(--color-graphite-500);
+  --hairline: var(--color-paper-200);
+  --accent: var(--color-signal-600);
+  --accent-strong: var(--color-signal-700);
+  --on-accent: #ffffff;
+  --amber: var(--color-amber-600);
+  --red: var(--color-red-600);
+  --graphite: var(--color-graphite-500);
+  --focus: var(--color-signal-600);
+  /* chart marks: validated with the dataviz palette script for the paper surface */
+  --chart-signal: #2b6cd9;
+  --chart-amber: #b7791f;
+  --chart-red: #b3261e;
+  --chart-graphite: #6b7480;
+  color-scheme: light;
+}
+
+[data-world="ink"] {
+  --bg: var(--color-ink-950);
+  --bg-raised: var(--color-ink-800);
+  --bg-muted: var(--color-ink-700);
+  --fg: var(--color-paper-50);
+  --fg-muted: var(--color-graphite-400);
+  --hairline: var(--color-ink-600);
+  --accent: var(--color-signal-400);
+  --accent-strong: var(--color-signal-300);
+  --on-accent: var(--color-ink-950);
+  --amber: var(--color-amber-400);
+  --red: var(--color-red-400);
+  --graphite: var(--color-graphite-400);
+  --focus: var(--color-signal-400);
+  /* chart marks on ink: darker than text tokens so they sit in the validator's dark lightness band */
+  --chart-signal: #5590e8;
+  --chart-amber: #bf8a2a;
+  --chart-red: #d8402f;
+  --chart-graphite: #8a94a0;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-raised: var(--bg-raised);
+  --color-bg-muted: var(--bg-muted);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-hairline: var(--hairline);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-on-accent: var(--on-accent);
+  --color-amber: var(--amber);
+  --color-red: var(--red);
+  --color-graphite: var(--graphite);
+  --color-chart-signal: var(--chart-signal);
+  --color-chart-amber: var(--chart-amber);
+  --color-chart-red: var(--chart-red);
+  --color-chart-graphite: var(--chart-graphite);
+}
+
+@layer base {
+  * {
+    border-color: var(--hairline);
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.5;
+    font-feature-settings: "cv11", "ss01";
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--accent) 30%, transparent);
+  }
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-1);
+  }
+  h1, h2 {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+  .num, td.num, th.num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .micro {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 16px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+  button, [role="button"], a {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  .hairline-b { border-bottom: 1px solid var(--hairline); }
+  .hairline-t { border-top: 1px solid var(--hairline); }
+  .hairline { border: 1px solid var(--hairline); }
+  .skip-link {
+    position: absolute;
+    left: 8px;
+    top: -48px;
+    z-index: 100;
+    background: var(--bg-raised);
+    color: var(--fg);
+    padding: 8px 12px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-2);
+  }
+  .skip-link:focus { top: 8px; }
+  .scroll-x { overflow-x: auto; overscroll-behavior-x: contain; }
+  .diag-hatch {
+    background-image: repeating-linear-gradient(135deg, currentColor 0 1px, transparent 1px 5px);
+    opacity: 0.55;
+  }
+  .content-auto { content-visibility: auto; contain-intrinsic-size: 1px 800px; }
+}

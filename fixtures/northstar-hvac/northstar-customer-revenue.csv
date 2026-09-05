@@ -1,0 +1,52 @@
+customer_id,customer_name,segment,revenue_type,fy2024_revenue,fy2023_revenue,contract_start,contract_end,auto_renew
+C-1001,Apex Logistics Park,Industrial / logistics,maintenance_agreement,2850000,2552896,2024-01-01,2026-12-31,yes
+C-1002,Harbor Medical Campus,Healthcare,maintenance_agreement,1120000,1003243,2023-07-01,2028-06-30,no
+C-1003,Cascade Cold Storage,Industrial / logistics,maintenance_agreement,640000,573282,2022-04-01,2025-03-31,yes
+C-1004,Meridian Office Portfolio,Commercial office,maintenance_agreement,585000,524015,2023-01-01,2025-12-31,yes
+C-1005,Summit Ridge Schools,Education,maintenance_agreement,520000,465792,2021-08-01,2026-07-31,no
+C-1006,Pinecrest Senior Living,Healthcare,maintenance_agreement,468000,419212,2023-03-01,2026-02-28,yes
+C-1007,Ironbridge Manufacturing,Industrial / logistics,maintenance_agreement,455000,407568,2022-10-01,2025-09-30,yes
+C-1008,Lakeshore Retail Center,Retail,maintenance_agreement,392000,351135,2024-02-01,2027-01-31,yes
+C-1009,Northgate Data Center,Technology,maintenance_agreement,380000,340386,2023-05-01,2026-04-30,no
+C-1010,Riverside Municipal Buildings,Government,maintenance_agreement,345000,309035,2022-07-01,2025-06-30,no
+C-1011,Bluewater Hotel Group,Hospitality,maintenance_agreement,298000,266934,2023-09-01,2026-08-31,yes
+C-1012,Copperline Distribution,Industrial / logistics,maintenance_agreement,236000,211398,2024-03-01,2027-02-28,yes
+C-1013,Granite Peak Church,Non-profit,maintenance_agreement,118000,105699,2022-01-01,2024-12-31,yes
+C-1014,Westfield Dental Group,Healthcare,maintenance_agreement,96000,85992,2023-11-01,2025-10-31,yes
+C-1015,Oakhollow Apartments,Multifamily,maintenance_agreement,84000,75243,2024-01-01,2025-12-31,yes
+C-1016,Silver Creek Brewery,Food and beverage,maintenance_agreement,72000,64494,2023-06-01,2025-05-31,yes
+C-1017,Harborview Library,Government,maintenance_agreement,60000,53745,2022-09-01,2025-08-31,no
+C-1018,Ashford Veterinary,Healthcare,maintenance_agreement,41000,36726,2024-04-01,2026-03-31,yes
+C-1019,Elmwood Pharmacy,Retail,maintenance_agreement,46000,41205,2023-02-01,2025-01-31,yes
+C-2001,Trailhead Logistics (new build),Industrial / logistics,project,720000,644942,,,
+C-2002,Kestrel Foods Plant,Food and beverage,project,615000,550888,,,
+C-2003,Bayline Community College,Education,project,480000,429961,,,
+C-2004,Foxglove Apartments,Multifamily,project,355000,317992,,,
+C-2005,Mercer Street Lofts,Multifamily,project,265000,237375,,,
+C-2006,Stonebrook Church,Non-profit,project,175000,156757,,,
+C-1002,Harbor Medical Campus,Healthcare,service_call,118000,105699,,,
+C-1004,Meridian Office Portfolio,Commercial office,service_call,94000,84201,,,
+C-3003,Downtown Diner Group,Food and beverage,service_call,86000,77035,,,
+C-3004,Redwood Fitness,Retail,service_call,79000,70764,,,
+C-3005,Clearwater Car Wash,Retail,service_call,72000,64494,,,
+C-3006,Ridgeline Storage Units,Industrial / logistics,service_call,70000,62703,,,
+C-3007,Juniper Coffee Roasters,Food and beverage,service_call,68000,60911,,,
+C-3008,Beacon Auto Body,Automotive,service_call,65000,58224,,,
+C-3009,Cobalt Print and Copy,Commercial office,service_call,64000,57328,,,
+C-3010,Maple Street Bakery,Food and beverage,service_call,61000,54641,,,
+C-3011,Northside Urgent Care,Healthcare,service_call,58000,51954,,,
+C-3012,Tidewater Marina,Hospitality,service_call,57000,51058,,,
+C-3013,Prairie Feed and Supply,Retail,service_call,55000,49266,,,
+C-3014,Sunset Cinemas,Hospitality,service_call,54000,48371,,,
+C-3015,Crown Point Storage,Industrial / logistics,service_call,52000,46579,,,
+C-3016,Hollis Print Shop,Commercial office,service_call,50000,44788,,,
+C-3017,Fieldstone Winery,Food and beverage,service_call,49000,43892,,,
+C-3018,Alder Grove Preschool,Education,service_call,48000,42996,,,
+C-3019,Kingsway Laundromat,Retail,service_call,47000,42100,,,
+C-3020,Orchard Lane Florist,Retail,service_call,45000,40309,,,
+C-3021,Pemberton Hardware,Retail,service_call,44000,39413,,,
+C-3022,Lantern Hill Inn,Hospitality,service_call,43000,38517,,,
+C-3023,Vista Grande Taqueria,Food and beverage,service_call,41000,36726,,,
+C-3024,Quarry Road Tire,Automotive,service_call,40000,35830,,,
+C-3025,Willow Bend Salon,Retail,service_call,38000,34039,,,
+C-3026,Anchor Point Church,Non-profit,service_call,36000,32247,,,

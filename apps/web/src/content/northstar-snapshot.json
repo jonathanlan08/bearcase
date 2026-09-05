@@ -1,0 +1,265 @@
+{
+ "company": "Northstar HVAC Services, LLC",
+ "fictional": true,
+ "revenue": {
+  "FY2022": "10400000",
+  "FY2023": "11600000",
+  "FY2024": "12950000"
+ },
+ "cagr_pct": "11.58",
+ "cim_growth_pct": "18",
+ "top_customer": {
+  "name": "Apex Logistics Park",
+  "revenue": "2850000",
+  "pct": "22.00",
+  "cim_max_pct": "10"
+ },
+ "recurring": {
+  "pct": "68.00",
+  "cim_pct": "85"
+ },
+ "ebitda": {
+  "reported": "1640000",
+  "seller": "2100000",
+  "verified": "1810000"
+ },
+ "addbacks": [
+  {
+   "label": "Owner compensation normalization",
+   "amount": "105000",
+   "decision": "accepted"
+  },
+  {
+   "label": "One-time litigation settlement",
+   "amount": "65000",
+   "decision": "accepted"
+  },
+  {
+   "label": "Temporary labor",
+   "amount": "130000",
+   "decision": "rejected"
+  },
+  {
+   "label": "Marketing relaunch",
+   "amount": "95000",
+   "decision": "review_required"
+  },
+  {
+   "label": "Post-close integration savings",
+   "amount": "65000",
+   "decision": "unsupported"
+  }
+ ],
+ "deal": {
+  "ev": "12600000",
+  "debt": "7560000",
+  "equity": "5040000",
+  "rate": "8.0",
+  "years": 10,
+  "threshold": "1.25",
+  "ads": "1100683.94"
+ },
+ "scenarios": {
+  "base": {
+   "dscr": "1.34",
+   "cfads": "1476825.56",
+   "breach": false
+  },
+  "downside": {
+   "dscr": "0.99",
+   "cfads": "1121431.87",
+   "breach": true
+  },
+  "severe_downside": {
+   "dscr": "0.23",
+   "cfads": "279550.00",
+   "breach": true
+  }
+ },
+ "sensitivity": {
+  "rows": [
+   "0",
+   "25",
+   "50",
+   "75",
+   "100"
+  ],
+  "cols": [
+   "0",
+   "-100",
+   "-200",
+   "-300",
+   "-400"
+  ],
+  "cells": [
+   [
+    {
+     "v": "1.34",
+     "b": false
+    },
+    {
+     "v": "1.24",
+     "b": true
+    },
+    {
+     "v": "1.14",
+     "b": true
+    },
+    {
+     "v": "1.05",
+     "b": true
+    },
+    {
+     "v": "0.95",
+     "b": true
+    }
+   ],
+   [
+    {
+     "v": "1.20",
+     "b": true
+    },
+    {
+     "v": "1.11",
+     "b": true
+    },
+    {
+     "v": "1.02",
+     "b": true
+    },
+    {
+     "v": "0.93",
+     "b": true
+    },
+    {
+     "v": "0.84",
+     "b": true
+    }
+   ],
+   [
+    {
+     "v": "1.07",
+     "b": true
+    },
+    {
+     "v": "0.99",
+     "b": true
+    },
+    {
+     "v": "0.90",
+     "b": true
+    },
+    {
+     "v": "0.81",
+     "b": true
+    },
+    {
+     "v": "0.73",
+     "b": true
+    }
+   ],
+   [
+    {
+     "v": "0.94",
+     "b": true
+    },
+    {
+     "v": "0.86",
+     "b": true
+    },
+    {
+     "v": "0.78",
+     "b": true
+    },
+    {
+     "v": "0.68",
+     "b": true
+    },
+    {
+     "v": "0.58",
+     "b": true
+    }
+   ],
+   [
+    {
+     "v": "0.80",
+     "b": true
+    },
+    {
+     "v": "0.71",
+     "b": true
+    },
+    {
+     "v": "0.61",
+     "b": true
+    },
+    {
+     "v": "0.52",
+     "b": true
+    },
+    {
+     "v": "0.42",
+     "b": true
+    }
+   ]
+  ]
+ },
+ "claims": [
+  {
+   "text": "Revenue has grown at approximately 18% annually since FY2022.",
+   "source": "CIM p.3",
+   "status": "contradicted",
+   "verified": "11.6% CAGR"
+  },
+  {
+   "text": "No single customer represents more than 10% of revenue.",
+   "source": "CIM p.5",
+   "status": "contradicted",
+   "verified": "Apex Logistics Park 22.0%"
+  },
+  {
+   "text": "Adjusted EBITDA of $2.10 million for FY2024.",
+   "source": "CIM p.3",
+   "status": "contradicted",
+   "verified": "$1.81M verified"
+  },
+  {
+   "text": "Approximately 85% of revenue is recurring under maintenance agreements.",
+   "source": "CIM p.5",
+   "status": "contradicted",
+   "verified": "68.0% contract-supported"
+  },
+  {
+   "text": "FY2024 revenue of $12.95 million.",
+   "source": "CIM p.3",
+   "status": "supported",
+   "verified": "$12,950,000 (Income Statement!D4)"
+  },
+  {
+   "text": "Apex agreement runs through December 31, 2027 with automatic annual renewal.",
+   "source": "CIM p.6",
+   "status": "review_required",
+   "verified": "Contract ends Dec 31, 2026; 60-day termination for convenience"
+  },
+  {
+   "text": "Annual customer churn is below 5%.",
+   "source": "CIM p.5",
+   "status": "unsupported",
+   "verified": "No churn data in the deal room"
+  }
+ ],
+ "report_sections": [
+  "Deal overview",
+  "Executive summary",
+  "Verified financials",
+  "Contradictions",
+  "Customer concentration",
+  "EBITDA adjustments",
+  "Scenarios",
+  "Risk register",
+  "Management questions",
+  "Negotiation conditions",
+  "Reviewer decisions",
+  "Citations"
+ ]
+}
