@@ -87,3 +87,8 @@ class NarrativeSection(Strict):
 
 class ReportNarrativeOutput(Strict):
     sections: list[NarrativeSection]
+
+
+class AnswerOutput(Strict):
+    statements: list[NarrativeStatement]
+    confidence: float = Field(ge=0, le=1)

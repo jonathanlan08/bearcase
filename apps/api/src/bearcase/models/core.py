@@ -417,6 +417,25 @@ class ReviewerComment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     user: Mapped[User] = relationship()
 
 
+class DealQuestion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Ask the Deal: a question and its citation-validated answer."""
+
+    __tablename__ = "deal_questions"
+    deal_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    intents: Mapped[list] = mapped_column(JSON, default=list)
+    statements: Mapped[list] = mapped_column(JSON, default=list)
+    grounded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    validation: Mapped[dict] = mapped_column(JSON, default=dict)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    model: Mapped[str] = mapped_column(String(80), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
+
+
 class AuditEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "audit_events"
     __table_args__ = (Index("ix_audit_deal_created", "deal_id", "created_at"),)

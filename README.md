@@ -34,7 +34,8 @@ BearCase is not a document chatbot. Its primary object is a claim ledger with ev
 - Report validation: material statements must cite evidence or a calculation, or the report fails
 - Anthropic provider behind an interface plus a deterministic rule-based mock that needs no API key
 - Prompt-injection fixtures stored as inert document text and surfaced as findings
-- Evaluation harness scoring extraction recall, status accuracy, contradiction precision, citation resolution, injection resistance, determinism, and report validation
+- **Ask the Deal**: citation-first Q&A ("Why was adjusted EBITDA reduced?") answered only from persisted rows; every factual sentence cites evidence or a calculation, uncited sentences are removed, and each answer is stored with provider, prompt version, and an audit event
+- Evaluation harness scoring extraction recall, status accuracy, contradiction precision, citation resolution, injection resistance, determinism, report validation, and Q&A grounding
 
 ## The fictional demonstration
 
@@ -91,7 +92,7 @@ make e2e         # Playwright smoke tests (starts API and web)
 make lint typecheck
 ```
 
-The evaluation report lists eleven checks with pass/fail and detail. Both the tests and the evaluations run in CI (`.github/workflows/ci.yml`), along with a check that the committed ground truth matches the fixture generator.
+The evaluation report lists twelve checks with pass/fail and detail. Both the tests and the evaluations run in CI (`.github/workflows/ci.yml`), along with a check that the committed ground truth matches the fixture generator.
 
 ## Screenshots
 
@@ -103,11 +104,11 @@ The evaluation report lists eleven checks with pass/fail and detail. Both the te
 |---|---|
 | ![Financial Verification](docs/screenshots/05-financial-verification.png) | ![Scenario Lab](docs/screenshots/06-scenario-lab.png) |
 
-| Red-Team Report with citations | Deal Room processing states |
+| Red-Team Report with citations | Ask the Deal: citation-first Q&A |
 |---|---|
-| ![Report](docs/screenshots/07-report.png) | ![Deal Room](docs/screenshots/03-deal-room.png) |
+| ![Report](docs/screenshots/07-report.png) | ![Ask the Deal](docs/screenshots/12-ask-the-deal.png) |
 
-More: [overview](docs/screenshots/02-overview.png), [audit history](docs/screenshots/08-audit-history.png), [mobile landing](docs/screenshots/10-mobile-landing.png), [mobile claims](docs/screenshots/11-mobile-claims.png). Screenshots are captured with `npx tsx scripts/screenshots.ts` in `apps/web` against a running stack; the hero shows the reduced-motion static composition (the WebGL scene animates in the browser).
+More: [Deal Room](docs/screenshots/03-deal-room.png), [overview](docs/screenshots/02-overview.png), [audit history](docs/screenshots/08-audit-history.png), [mobile landing](docs/screenshots/10-mobile-landing.png), [mobile claims](docs/screenshots/11-mobile-claims.png). Screenshots are captured with `npx tsx scripts/screenshots.ts` in `apps/web` against a running stack; the hero shows the reduced-motion static composition (the WebGL scene animates in the browser).
 
 ## Architecture
 

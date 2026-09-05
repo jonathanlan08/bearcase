@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from bearcase.config import get_settings
 from bearcase.schemas.ai_v1 import (
     SCHEMA_VERSION,
+    AnswerOutput,
     ClassificationOutput,
     ExtractionOutput,
     ReportNarrativeOutput,
@@ -72,6 +73,7 @@ class AIProvider(Protocol):
     def extract_claims(self, doc: DocumentContext) -> ProviderResult[ExtractionOutput]: ...
     def verify_claim(self, claim: ClaimContext, candidates: list[ChunkRef]) -> ProviderResult[VerificationOutput]: ...
     def draft_narrative(self, material: dict[str, Any]) -> ProviderResult[ReportNarrativeOutput]: ...
+    def answer_question(self, question: str, material: dict[str, Any]) -> ProviderResult[AnswerOutput]: ...
 
 
 def get_provider(name: str | None = None) -> AIProvider:

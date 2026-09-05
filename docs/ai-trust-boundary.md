@@ -18,5 +18,8 @@ File validation and hashing; auth and per-deal authorization; state transitions;
 9. Missing evidence is stated, never invented. Absence of evidence yields Unsupported, not Contradicted.
 10. Every demo surface discloses synthetic data and non-advice status.
 
+## Ask the Deal
+Questions are answered only from persisted rows (claims, metrics, adjustments, scenario results, findings, evidence). Code builds the material and validates the answer; the model (or the rule-based composer) only drafts sentences. Sentences with numbers that lack a resolvable citation are removed and the answer is marked not fully grounded. No new calculations are performed while answering.
+
 ## Evaluations
-`bearcase eval` seeds Northstar into a scratch database and scores: structured-output validity, extraction recall, status accuracy, contradiction precision, citation completeness, citation resolution, unsupported behaviour, review-required behaviour, no invented evidence, prompt-injection resistance, mock determinism, report citation validation.
+`bearcase eval` seeds Northstar into a scratch database and scores: structured-output validity, extraction recall, status accuracy, contradiction precision, citation completeness, citation resolution, unsupported behaviour, review-required behaviour, no invented evidence, prompt-injection resistance, mock determinism, report citation validation, Ask the Deal grounding.

@@ -9,10 +9,10 @@ from typing import Any, TypeVar
 import anthropic
 from pydantic import BaseModel, ValidationError
 
-from bearcase.ai.prompts import CLASSIFY, EXTRACT, NARRATIVE, PROMPT_VERSION, SYSTEM_BASE, VERIFY
+from bearcase.ai.prompts import ANSWER, CLASSIFY, EXTRACT, NARRATIVE, PROMPT_VERSION, SYSTEM_BASE, VERIFY
 from bearcase.ai.provider import ChunkRef, ClaimContext, DocumentContext, ProviderResult, render_chunks
 from bearcase.config import get_settings
-from bearcase.schemas.ai_v1 import ClassificationOutput, ExtractionOutput, ReportNarrativeOutput, VerificationOutput
+from bearcase.schemas.ai_v1 import AnswerOutput, ClassificationOutput, ExtractionOutput, ReportNarrativeOutput, VerificationOutput
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -98,6 +98,10 @@ class AnthropicProvider:
             chunks=render_chunks(candidates),
         )
         return self._call(prompt, VerificationOutput)
+
+    def answer_question(self, question: str, material: dict[str, Any]) -> ProviderResult[AnswerOutput]:
+        prompt = ANSWER.format(question=question[:1000], material=json.dumps(material, indent=1, default=str)[:60000])
+        return self._call(prompt, AnswerOutput)
 
     def draft_narrative(self, material: dict[str, Any]) -> ProviderResult[ReportNarrativeOutput]:
         return self._call(NARRATIVE.format(material=json.dumps(material, indent=1, default=str)[:80000]), ReportNarrativeOutput)

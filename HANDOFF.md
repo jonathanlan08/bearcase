@@ -12,6 +12,7 @@ Last updated: 2026-09-05. Single-session build with Claude Fable 5.1 (no subagen
 | 3 Processing and AI pipeline | done — validation, parsers, classification, evidence, mock + Anthropic providers, retrieval, guardrails, injection detection |
 | 4 Claim Audit and Financial Verification | done — extraction, deterministic verification, add-back review, review decisions, audit events, UI |
 | 5 Scenario Lab and report | done — immutable runs, sensitivity grid, report assembly, citation validation, MD/PDF export, UI |
+| 5b Ask the Deal | done — citation-first Q&A over persisted rows, mock + Anthropic, `deal_questions` table, panel in the app (⌘/) |
 | 6 Landing page and polish | done — Ink/Paper design, Evidence Core scene with static fallback, methodology page |
 | 7 Audit and GitHub readiness | see "Verification" |
 
@@ -20,7 +21,7 @@ Last updated: 2026-09-05. Single-session build with Claude Fable 5.1 (no subagen
 | Check | Result |
 |---|---|
 | `pytest` (apps/api) | 43 passed |
-| `bearcase eval` (mock provider) | PASS, 11/11 checks; extraction recall 19/19; status accuracy 19/19; contradiction precision 6/6; 65/65 citations resolve; report v1 valid (36/36 material statements cited) |
+| `bearcase eval` (mock provider) | PASS, 12/12 checks (incl. Ask the Deal grounding); extraction recall 19/19; status accuracy 19/19; contradiction precision 6/6; 65/65 citations resolve; report v1 valid (36/36 material statements cited) |
 | `ruff check` / `ruff format --check` / `mypy src` | clean |
 | `vitest` (apps/web) | 7 passed |
 | `tsc --noEmit` / `eslint` | clean |

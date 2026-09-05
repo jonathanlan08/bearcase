@@ -10,6 +10,7 @@ import { useDeal, useDeals, useSummary, qk } from "@/components/app/hooks";
 import { useMe } from "@/components/app/gate";
 import { Wordmark } from "@/components/ui/primitives";
 import { DropdownMenu } from "radix-ui";
+import { AskTheDeal } from "@/components/domain/ask-the-deal";
 
 const PRIMARY = [
   { key: "documents", label: "Deal Room", n: "01", Icon: FolderOpen },
@@ -95,6 +96,7 @@ export function DealShell({ children }: { children: React.ReactNode }) {
           <span className="min-w-0 flex-1 truncate text-sm font-medium">{deal.data?.company_name}</span>
         </header>
         <main id="main" className="flex-1 pb-20 md:pb-0">{children}</main>
+        <AskTheDeal dealId={dealId} />
         <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-hairline bg-bg-raised pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Primary">
           {PRIMARY.map(({ key, label, Icon }) => (
             <Link key={key} href={`${base}/${key}`} aria-current={isActive(key) ? "page" : undefined} className={`flex h-14 flex-col items-center justify-center gap-1 text-[10px] ${isActive(key) ? "text-fg font-medium" : "text-fg-muted"}`}>

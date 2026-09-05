@@ -36,6 +36,29 @@ const C = {
 };
 const STATUS_COLOR: Record<Status, THREE.Color> = { supported: C.signal, contradicted: C.red, unsupported: C.graphite, review: C.amber };
 
+/* ---------- procedural "paper with text lines" texture (no image assets) ---------- */
+let paperTexture: THREE.CanvasTexture | null = null;
+function getPaperTexture(): THREE.CanvasTexture | null {
+  if (paperTexture) return paperTexture;
+  if (typeof document === "undefined") return null;
+  const c = document.createElement("canvas");
+  c.width = 256; c.height = 332;
+  const g = c.getContext("2d");
+  if (!g) return null;
+  g.fillStyle = "#F5F2EC"; g.fillRect(0, 0, c.width, c.height);
+  g.fillStyle = "#2C333C";
+  g.fillRect(28, 30, 120, 8); // title
+  let y = 62;
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  while (y < 300) { const w = 90 + rnd() * 120; g.globalAlpha = 0.55 + rnd() * 0.3; g.fillRect(28, y, w, 4); y += 14 + (rnd() < 0.18 ? 12 : 0); }
+  g.globalAlpha = 0.9; g.fillStyle = "#7FB2FF"; g.fillRect(150, 118, 60, 4); g.fillRect(96, 174, 40, 4); // highlighted figures
+  paperTexture = new THREE.CanvasTexture(c);
+  paperTexture.colorSpace = THREE.SRGBColorSpace;
+  paperTexture.anisotropy = 4;
+  return paperTexture;
+}
+
 /* ---------- shared, mutable scene state (one object, updated per frame) ---------- */
 interface SceneState { p: number; pointer: THREE.Vector2; drag: THREE.Vector2; selected: number | null; hover: number | null; degrade: () => void }
 
@@ -67,17 +90,17 @@ function nodePose(i: number, p: number, docPos: THREE.Vector3): THREE.Vector3 {
     const gi = i % 6;
     const cell = new THREE.Vector3(1.9 + (gi % 3) * 0.55, 0.8 - Math.floor(gi / 3) * 0.5, 0.3);
     pos.lerp(cell, ramp(p, 0.68, 0.8));
-    const report = new THREE.Vector3(3.6, -1.3 + gi * 0.12, 0.6);
+    const report = new THREE.Vector3(2.55, -0.85 + gi * 0.12, 0.62);
     pos.lerp(report, ramp(p, 0.9, 1));
   } else if (status === "contradicted") {
     const jitter = Math.sin(p * 80 + i) * 0.03 * ramp(p, 0.5, 0.6) * (1 - ramp(p, 0.68, 0.72));
     pos.add(new THREE.Vector3(jitter, -jitter, 0));
-    const risk = new THREE.Vector3(3.5, -0.6 + (i % 4) * 0.14, 0.6);
+    const risk = new THREE.Vector3(2.45, -0.3 + (i % 4) * 0.14, 0.62);
     pos.lerp(risk, ramp(p, 0.9, 1));
   } else if (status === "unsupported") {
     pos.y -= ramp(p, 0.6, 0.68) * 2.2;
   } else {
-    const rev = new THREE.Vector3(3.55, -1.0, 0.6);
+    const rev = new THREE.Vector3(2.5, -0.6, 0.62);
     pos.lerp(rev, ramp(p, 0.9, 1));
   }
   return pos;
@@ -119,7 +142,7 @@ function Documents({ state, count, edges }: { state: SceneState; count: number; 
     <group>
       <instancedMesh ref={mesh} args={[undefined, undefined, count]} frustumCulled={false}>
         <planeGeometry args={[1, 1.3]} />
-        <meshStandardMaterial color={C.paper} roughness={0.9} metalness={0} transparent opacity={0.92} side={THREE.DoubleSide} emissive={C.core} emissiveIntensity={0.2} />
+        <meshStandardMaterial map={getPaperTexture() ?? undefined} color={C.paper} roughness={0.9} metalness={0} transparent opacity={0.94} side={THREE.DoubleSide} emissive={C.core} emissiveIntensity={0.15} />
       </instancedMesh>
       {edges && <lineSegments ref={edgeRef} geometry={edgeGeo}><lineBasicMaterial color={C.inkEdge} transparent opacity={0.6} /></lineSegments>}
     </group>
@@ -297,7 +320,7 @@ function ModelGrid({ state }: { state: SceneState }) {
       const delay = (r * 6 + c) / 36;
       const k = Math.max(0, Math.min(1, (assemble - delay * 0.5) / 0.5));
       const sink = r === 4 ? down * 0.28 : 0;
-      tmp.position.set(1.6 + c * 0.42 * (1 - compress * 0.6) + compress * 1.8, 1.0 - r * 0.36 + (1 - k) * 0.6 - sink - compress * 1.2, 0.3 - (1 - k) * 1.5);
+      tmp.position.set(1.6 + c * 0.42 * (1 - compress * 0.6) + compress * 0.9, 1.0 - r * 0.36 + (1 - k) * 0.6 - sink - compress * 0.5, 0.3 - (1 - k) * 1.5);
       tmp.rotation.set(0, 0, 0);
       tmp.scale.set(0.36 * k, 0.28 * k, 0.05 * k);
       tmp.updateMatrix();
@@ -309,7 +332,7 @@ function ModelGrid({ state }: { state: SceneState }) {
     if (mesh.current.instanceColor) mesh.current.instanceColor.needsUpdate = true;
     if (rule.current) {
       rule.current.visible = down > 0.01 && compress < 0.99;
-      rule.current.position.set(2.65 + compress * 1.8, 1.0 - 4 * 0.36 + 0.14 - down * 0.28 - compress * 1.2, 0.36);
+      rule.current.position.set(2.65 + compress * 0.9, 1.0 - 4 * 0.36 + 0.14 - down * 0.28 - compress * 0.5, 0.36);
       (rule.current.material as THREE.MeshBasicMaterial).color.copy(C.amber).lerp(C.red, ramp(p, 0.86, 0.9));
       (rule.current.material as THREE.MeshBasicMaterial).opacity = 0.9 * down * (1 - compress);
     }
@@ -336,8 +359,8 @@ function ReportStack({ state }: { state: SceneState }) {
     const k = ramp(state.p, 0.9, 1);
     for (let i = 0; i < 4; i++) {
       const d = Math.max(0, Math.min(1, (k - i * 0.15) / 0.55));
-      tmp.position.set(3.6 + i * 0.03, -1.4 + i * 0.05 + (1 - d) * 0.5, 0.5 - i * 0.02);
-      tmp.rotation.set(-0.1, -0.3, 0);
+      tmp.position.set(2.5 + i * 0.03, -0.9 + i * 0.05 + (1 - d) * 0.5, 0.5 - i * 0.02);
+      tmp.rotation.set(-0.08, -0.25, 0);
       tmp.scale.setScalar(d);
       tmp.updateMatrix();
       mesh.current.setMatrixAt(i, tmp.matrix);
@@ -345,7 +368,7 @@ function ReportStack({ state }: { state: SceneState }) {
     mesh.current.instanceMatrix.needsUpdate = true;
   });
   return (
-    <instancedMesh ref={mesh} args={[undefined, undefined, 4]} frustumCulled={false}><planeGeometry args={[1.1, 1.4]} /><meshStandardMaterial color={C.paper} roughness={0.9} transparent opacity={0.95} side={THREE.DoubleSide} /></instancedMesh>
+    <instancedMesh ref={mesh} args={[undefined, undefined, 4]} frustumCulled={false}><planeGeometry args={[1.1, 1.4]} /><meshStandardMaterial map={getPaperTexture() ?? undefined} color={C.paper} roughness={0.9} transparent opacity={0.95} side={THREE.DoubleSide} /></instancedMesh>
   );
 }
 

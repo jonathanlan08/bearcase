@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from bearcase import __version__
-from bearcase.api.routes import audit, auth, claims, deals, demo, documents, financials, health, reports, scenarios
+from bearcase.api.routes import audit, auth, claims, deals, demo, documents, financials, health, questions, reports, scenarios
 from bearcase.config import get_settings
 
 log = logging.getLogger("bearcase")
@@ -74,6 +74,7 @@ def create_app() -> FastAPI:
         scenarios.router,
         reports.router,
         audit.router,
+        questions.router,
     ):
         app.include_router(router, prefix="/api")
     return app

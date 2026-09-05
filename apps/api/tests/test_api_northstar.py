@@ -202,3 +202,23 @@ def test_create_deal_and_process_without_documents(client):
     assert r.status_code == 202
     jobs = client.get(f"/api/deals/{deal_id}/jobs").json()
     assert jobs[0]["status"] == "failed" and "Upload" in jobs[0]["error"]
+
+
+def test_ask_the_deal_is_grounded(client, demo):
+    r = client.post(f"/api/deals/{demo['id']}/ask", json={"question": "Why was adjusted EBITDA reduced?"})
+    assert r.status_code == 201, r.text
+    a = r.json()
+    assert a["grounded"] is True and a["intents"] == ["ebitda"]
+    text = " ".join(s["text"] for s in a["statements"])
+    assert "$2,100,000" in text and "$1,810,000" in text and "rejected" in text
+    assert all(s["evidence_ids"] or s["metric_ids"] for s in a["statements"] if any(ch.isdigit() for ch in s["text"]))
+    for eid in a["statements"][0]["evidence_ids"]:
+        assert client.get(f"/api/deals/{demo['id']}/evidence/{eid}").status_code == 200
+    r = client.post(f"/api/deals/{demo['id']}/ask", json={"question": "What happens to DSCR if we lose the largest customer?"})
+    a = r.json()
+    assert a["grounded"] and any("Downside" in s["text"] for s in a["statements"])
+    r = client.post(f"/api/deals/{demo['id']}/ask", json={"question": "Tell me about the weather"})
+    assert r.status_code == 201 and r.json()["intents"] == ["fallback"]
+    hist = client.get(f"/api/deals/{demo['id']}/questions").json()
+    assert len(hist) >= 3 and hist[0]["question"].startswith("Tell me")
+    assert any(e["event_type"] == "deal.asked" for e in client.get(f"/api/deals/{demo['id']}/audit").json())

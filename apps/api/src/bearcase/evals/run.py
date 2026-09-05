@@ -210,6 +210,33 @@ def run_evals() -> dict[str, Any]:
             f"report v{report.version_no if report else '-'}: {report.validation if report else 'missing'}",
         )
 
+        # 12 Ask the Deal grounding: canned questions must answer only with resolvable citations
+        from bearcase.qa.material import build_material, evidence_and_metric_ids
+        from bearcase.reports.validate import validate_sections
+
+        provider = get_provider()
+        ev_ids, me_ids = evidence_and_metric_ids(db, deal.id)
+        qa_ok, qa_detail = 0, []
+        questions = [
+            "Why was adjusted EBITDA reduced?",
+            "What do the statements show for revenue growth?",
+            "What happens to DSCR if we lose the largest customer?",
+            "Which documents are missing?",
+        ]
+        for question in questions:
+            res = provider.answer_question(question, build_material(db, deal, question))
+            stmts = [
+                {"text": st.text, "evidence_ids": st.evidence_ids, "metric_ids": st.metric_ids}
+                for st in (res.output.statements if res.ok and res.output else [])
+            ]
+            v = validate_sections([{"key": "answer", "statements": stmts, "derived_from": []}], ev_ids, me_ids)
+            ok = res.ok and bool(stmts) and v["valid"]
+            qa_ok += int(ok)
+            qa_detail.append(
+                f"{question[:32]}…: {'ok' if ok else 'FAIL'} ({v['material_cited']}/{v['material_statements']} cited)"
+            )
+        check("ask_the_deal_grounding", qa_ok == len(questions), "; ".join(qa_detail), qa_ok / len(questions))
+
     passed = all(c["passed"] for c in checks)
     lines = [f"BearCase evaluation ({get_provider().name}/{get_provider().model}) - {'PASS' if passed else 'FAIL'}"]
     for c in checks:

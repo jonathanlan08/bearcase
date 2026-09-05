@@ -10,5 +10,5 @@ See the package brief for the full original scope. This file records what shippe
 - Review actions: accept, reject (note required), correct (value/unit/status + note), undo. Add-back decisions with rationale.
 - Scenarios: base, downside, severe downside, custom; twelve assumptions with ranges; immutable runs; sensitivity grid.
 - Report: fourteen sections, four outcomes, validation, Markdown and PDF export.
-- Optional features implemented: add-back waterfall, sensitivity matrix, downloadable report, one-click citation navigation, document viewer with inert-instruction labeling.
-- Not implemented: reviewer comments UI (table exists), version comparison, claim graph, IC checklist, citation-first Q&A.
+- Optional features implemented: add-back waterfall, sensitivity matrix, downloadable report, citation-first Q&A ("Ask the Deal", `POST /deals/{id}/ask`, ⌘/ in the app), one-click citation navigation, document viewer with inert-instruction labeling.
+- Not implemented: reviewer comments UI (table exists), version comparison, claim graph, IC checklist.

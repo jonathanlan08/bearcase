@@ -17,6 +17,7 @@ from bearcase.ai.provider import ChunkRef, ClaimContext, DocumentContext, Provid
 from bearcase.ai.retrieval import LexicalRetriever, tokens
 from bearcase.ingest.injection import contains_instruction_text
 from bearcase.schemas.ai_v1 import (
+    AnswerOutput,
     ClassificationOutput,
     EvidenceJudgement,
     ExtractedClaim,
@@ -475,6 +476,12 @@ class MockProvider:
         sections.append(NarrativeSection(key="risk_commentary", statements=r))
         out = ReportNarrativeOutput(sections=sections)
         return ProviderResult(out, out.model_dump(mode="json"), {}, PROMPT_VERSION, input_hash=_hash(material))
+
+    def answer_question(self, question: str, material: dict[str, Any]) -> ProviderResult[AnswerOutput]:
+        from bearcase.qa.compose import compose
+
+        out = AnswerOutput(statements=compose(material), confidence=0.7)
+        return ProviderResult(out, out.model_dump(mode="json"), {}, PROMPT_VERSION, input_hash=_hash([question, material]))
 
 
 def _sentence_around(text: str, pos: int) -> str:

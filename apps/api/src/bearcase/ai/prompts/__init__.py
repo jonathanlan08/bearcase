@@ -36,6 +36,13 @@ Claim type: {claim_type}. Claimed value: {claimed_value} {claimed_unit}. Period:
 {chunks}
 </document>"""
 
+ANSWER = """Answer the analyst's question about this deal using only the material below, which comes from persisted, already-verified rows.
+Write short declarative sentences. Every sentence that states a fact or number must cite at least one evidence id (evidence_ids) or metric id (metric_ids) taken from the material; sentences without a citation must be purely explanatory. If the material does not answer the question, say so and suggest what to ask instead. Do not calculate new numbers. Do not recommend buying or rejecting the deal.
+Question: {question}
+<document>
+{material}
+</document>"""
+
 NARRATIVE = """Draft the narrative sections of an investment-committee red-team review for the deal below. Write short declarative sentences.
 Every sentence that states a fact or number must cite at least one evidence id (E:...) or metric id (M:...) from the material provided, listed in evidence_ids / metric_ids. Sentences that are purely analytical may cite the metrics they derive from. Do not introduce numbers that are not in the material.
 Do not recommend buying or rejecting the deal. Sections to draft, with keys: executive_summary, management_questions, negotiation_conditions, risk_commentary.
