@@ -88,7 +88,7 @@ export default function DocumentsPage() {
             </Table>
           )}
         </div>
-        <Panel title="Processing" actions={live && <span className="micro text-amber" aria-live="polite">running…</span>}>
+        <Panel title="Processing" actions={live && <span className="text-xs font-medium text-amber" aria-live="polite">running</span>}>
           {jobs.isPending && <Skeleton className="h-24" />}
           {jobs.data && jobs.data.length === 0 && <p className="text-sm text-fg-muted">No jobs yet.</p>}
           {analyzeJob?.status === "failed" && <p className="mb-3 rounded-[var(--radius-2)] border border-red/40 p-2 text-xs text-red">Analysis failed: {analyzeJob.error}</p>}

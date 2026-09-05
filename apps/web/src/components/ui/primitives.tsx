@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 export function MicroLabel({ children, className = "", as: Tag = "p" }: { children: ReactNode; className?: string; as?: "p" | "span" | "div" | "h2" | "h3" }) {
-  return <Tag className={`micro text-fg-muted ${className}`}>{children}</Tag>;
+  return <Tag className={`micro ${className}`}>{children}</Tag>;
 }
 
 export function Kbd({ children }: { children: ReactNode }) {

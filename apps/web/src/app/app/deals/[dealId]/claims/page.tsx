@@ -89,7 +89,7 @@ export default function ClaimsPage() {
             <div className="flex flex-col gap-5 p-4 md:p-6">
               <button type="button" className="flex items-center gap-1 text-sm text-fg-muted lg:hidden" onClick={() => setSelected(null)}><ArrowLeft size={14} /> Back to list</button>
               <div>
-                <div className="flex flex-wrap items-center gap-2"><StatusChip status={d.effective_status} />{current && d.effective_status !== d.status && <span className="text-xs text-fg-muted">reviewer decision · AI said <StatusChip status={d.status} size="sm" /></span>}<span className="micro ml-auto text-[10px]">{titleCase(d.claim_type)}{d.period_label ? ` · ${d.period_label}` : ""}</span></div>
+                <div className="flex flex-wrap items-center gap-2"><StatusChip status={d.effective_status} />{current && d.effective_status !== d.status && <span className="text-xs text-fg-muted">reviewer decision (AI said <StatusChip status={d.status} size="sm" />)</span>}<span className="ml-auto text-xs text-fg-muted">{titleCase(d.claim_type)}{d.period_label ? `, ${d.period_label}` : ""}</span></div>
                 <p className="mt-3 text-lg leading-snug">{d.claim_text}</p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {d.source_evidence && <CitationChip docType={d.doc_type} documentName={d.document_name} locator={d.source_evidence.locator} kind={d.source_evidence.kind} onClick={() => jumpToSource(d)} />}
@@ -100,11 +100,11 @@ export default function ClaimsPage() {
               <div className="grid grid-cols-2 gap-3 rounded-[var(--radius-3)] border border-hairline p-3 md:grid-cols-4">
                 <Stat label="Claimed" value={d.claimed_value !== null ? fmtValue(d.claimed_value, d.claimed_unit) : "—"} />
                 <Stat label="Verified" value={d.verified_value !== null ? fmtValue(d.verified_value, d.verified_unit ?? d.claimed_unit) : "—"} tone={d.status === "contradicted" ? "text-red" : d.status === "supported" ? "text-accent" : ""} />
-                <Stat label="Δ" value={d.claimed_value !== null && d.verified_value !== null ? delta(d) : "—"} />
+                <Stat label="Difference" value={d.claimed_value !== null && d.verified_value !== null ? delta(d) : "—"} />
                 <Stat label="Rule" value={d.status_rule ? d.status_rule.replace(/_/g, " ") : "—"} mono />
               </div>
               <section>
-                <h2 className="micro">How this status was decided</h2>
+                <h2 className="text-sm font-semibold">How this status was decided</h2>
                 <p className="mt-2 text-sm">{d.status_rationale ?? "No rationale recorded."}</p>
                 {d.verified_metric && (
                   <details className="mt-2 rounded-[var(--radius-2)] border border-hairline p-3 text-sm">
@@ -154,11 +154,11 @@ function delta(d: ClaimDetail): string {
 }
 
 function Stat({ label, value, tone = "", mono = false }: { label: string; value: string; tone?: string; mono?: boolean }) {
-  return <div><p className="micro text-[10px]">{label}</p><p className={`mt-1 ${mono ? "font-mono text-xs" : "num text-base"} ${tone}`}>{value}</p></div>;
+  return <div><p className="text-xs text-fg-muted">{label}</p><p className={`mt-1 ${mono ? "font-mono text-xs" : "num text-base"} ${tone}`}>{value}</p></div>;
 }
 
 function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return <button type="button" aria-pressed={active} onClick={onClick} className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs ${active ? "border-fg bg-fg text-bg" : "border-hairline hover:bg-bg-muted"}`}>{children}</button>;
+  return <button type="button" aria-pressed={active} onClick={onClick} className={`inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-2)] border px-3 text-xs ${active ? "border-fg bg-fg text-bg" : "border-hairline hover:bg-bg-muted"}`}>{children}</button>;
 }
 
 function ClaimRow({ claim, active, onSelect }: { claim: Claim; active: boolean; onSelect: () => void }) {
@@ -172,7 +172,7 @@ function ClaimRow({ claim, active, onSelect }: { claim: Claim; active: boolean; 
             <span>{titleCase(claim.claim_type)}</span>
             <span className="num">{claim.claimed_value !== null ? fmtValue(claim.claimed_value, claim.claimed_unit) : ""}{claim.verified_value !== null ? ` → ${fmtValue(claim.verified_value, claim.verified_unit ?? claim.claimed_unit)}` : ""}</span>
             <CitationChip docType={claim.doc_type} documentName={claim.document_name} locator={claim.source_locator} />
-            {claim.decisions.some((x) => x.is_current) && <span className="micro text-[10px] text-accent">reviewed</span>}
+            {claim.decisions.some((x) => x.is_current) && <span className="text-[11px] font-medium text-accent">reviewed</span>}
           </div>
         </div>
       </div>
@@ -184,7 +184,7 @@ function EvidenceGroup({ title, role, links, onOpen }: { title: string; role: "s
   const rows = links.filter((l) => l.role === role);
   return (
     <section>
-      <h2 className="micro flex items-center gap-2">{title} <span className="num">{rows.length}</span></h2>
+      <h2 className="flex items-center gap-2 text-sm font-semibold">{title} <span className="num font-normal text-fg-muted">({rows.length})</span></h2>
       {rows.length === 0 ? <p className="mt-2 text-sm text-fg-muted">{role === "supporting" ? "No supporting evidence was retrieved." : "No contradicting evidence."}</p> : (
         <ul className="mt-2 flex flex-col gap-2">
           {rows.map((l, i) => (

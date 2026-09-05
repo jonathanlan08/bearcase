@@ -18,7 +18,10 @@ File validation and hashing; auth and per-deal authorization; state transitions;
 9. Missing evidence is stated, never invented. Absence of evidence yields Unsupported, not Contradicted.
 10. Every demo surface discloses synthetic data and non-advice status.
 
-## Ask the Deal
+## Ask the deal (chat)
+The chat model can only reach the deal through eight read-only tools over persisted rows; the system prompt forbids calculations and recommendations, and code validates every citation marker, dropping unresolvable ones and flagging replies whose numeric paragraphs lack a citation. The single-shot Q&A endpoint below shares the same rules.
+
+## Ask the Deal (single-shot Q&A endpoint)
 Questions are answered only from persisted rows (claims, metrics, adjustments, scenario results, findings, evidence). Code builds the material and validates the answer; the model (or the rule-based composer) only drafts sentences. Sentences with numbers that lack a resolvable citation are removed and the answer is marked not fully grounded. No new calculations are performed while answering.
 
 ## Evaluations

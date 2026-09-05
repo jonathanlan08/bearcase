@@ -28,8 +28,7 @@ export default function DealsPage() {
         </div>
       </header>
       <main id="main" className="mx-auto max-w-6xl px-4 py-8 md:px-6">
-        <p className="micro">Deals</p>
-        <h1 className="mt-1 text-3xl">Review room</h1>
+        <h1 className="text-[30px]">Deals</h1>
         <div className="mt-6">
           {deals.isPending && <Skeleton className="h-40 w-full" />}
           {deals.isError && <ErrorState detail={String(deals.error)} onRetry={() => deals.refetch()} />}
@@ -42,7 +41,7 @@ export default function DealsPage() {
               <tbody>
                 {deals.data.map((d) => (
                   <tr key={d.id} className="hover:bg-bg-muted/60">
-                    <td className={td}><Link href={`/app/deals/${d.id}`} className="font-medium hover:underline">{d.company_name}</Link>{d.is_demo && <span className="micro ml-2 text-[10px]">fictional</span>}</td>
+                    <td className={td}><Link href={`/app/deals/${d.id}`} className="font-medium hover:underline">{d.company_name}</Link>{d.is_demo && <span className="ml-2 text-[11px] text-fg-muted">fictional</span>}</td>
                     <td className={`${td} text-fg-muted`}>{d.industry}</td>
                     <td className={`${td} num text-right`}>{fmtMoney(d.purchase_price)}</td>
                     <td className={`${td} num`}>{d.documents_ready}/{d.document_count}</td>

@@ -43,8 +43,8 @@ export default function ReportPage() {
           <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
             <span className="inline-flex items-center gap-2 rounded-full border border-hairline px-3 py-1 font-medium"><StatusGlyph status={r.outcome === "ready_for_ic_review" ? "supported" : r.outcome === "material_concerns_identified" ? "contradicted" : "review_required"} />{OUTCOME[r.outcome] ?? titleCase(r.outcome)}</span>
             <span className="inline-flex items-center gap-1.5"><StatusGlyph status={r.validation.valid ? "supported" : "contradicted"} size={12} /><span className="num">{r.validation.material_cited}/{r.validation.material_statements}</span> material statements cited</span>
-            <span className="text-fg-muted">v{r.version_no} · {fmtDate(r.created_at)}</span>
-            <span className="font-mono text-[11px] text-fg-muted">{r.provider}/{r.model} · prompt {r.prompt_version} · schema {r.schema_version} · engine {r.engine_version}</span>
+            <span className="text-fg-muted">Version {r.version_no}, {fmtDate(r.created_at)}</span>
+            <span className="text-xs text-fg-muted">{r.provider}/{r.model}, prompt {r.prompt_version}, schema {r.schema_version}, engine {r.engine_version}</span>
           </div>
         )}
       </PageHeader>
@@ -97,7 +97,7 @@ function Section({ s, onPeek, peek }: { s: ReportSection; onPeek: (id: string | 
   return (
     <section id={`sec-${s.key}`} className="mb-10 scroll-mt-4">
       <h2 className="text-2xl">{s.title}</h2>
-      {s.derived_from?.length > 0 && <p className="micro mt-1 text-[10px]">analysis derived from {s.derived_from.join(", ")}</p>}
+      {s.derived_from?.length > 0 && <p className="mt-1 text-xs text-fg-muted">Analysis derived from {s.derived_from.join(", ")}</p>}
       {s.statements.length > 0 && (
         <ul className="mt-3 flex flex-col gap-2 text-[15px] leading-relaxed">
           {s.statements.map((st, i) => (

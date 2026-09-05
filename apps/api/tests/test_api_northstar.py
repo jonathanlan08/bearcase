@@ -222,3 +222,30 @@ def test_ask_the_deal_is_grounded(client, demo):
     hist = client.get(f"/api/deals/{demo['id']}/questions").json()
     assert len(hist) >= 3 and hist[0]["question"].startswith("Tell me")
     assert any(e["event_type"] == "deal.asked" for e in client.get(f"/api/deals/{demo['id']}/audit").json())
+
+
+def test_chat_streams_grounded_reply_in_mock_mode(client, demo):
+    r = client.get(f"/api/deals/{demo['id']}/chat/config")
+    assert r.status_code == 200 and r.json()["provider"] in ("mock", "anthropic")
+    with client.stream("POST", f"/api/deals/{demo['id']}/chat", json={"message": "Why was adjusted EBITDA reduced?"}) as resp:
+        assert resp.status_code == 200 and resp.headers["content-type"].startswith("text/event-stream")
+        body = "".join(resp.iter_text())
+    events = [line[7:] for line in body.splitlines() if line.startswith("event: ")]
+    assert events[0] == "meta" and "text" in events and "citations" in events and events[-1] == "done"
+    import json as _json
+
+    done = _json.loads([line for line in body.splitlines() if line.startswith("data: ")][-1][6:])
+    assert done["grounded"] is True and "[E:" in done["content"] and "$1,810,000" in done["content"]
+    threads = client.get(f"/api/deals/{demo['id']}/chat/threads").json()
+    assert threads and threads[0]["message_count"] == 2
+    t = client.get(f"/api/deals/{demo['id']}/chat/threads/{threads[0]['id']}").json()
+    assert t["messages"][1]["role"] == "assistant" and t["messages"][1]["citations"]["evidence"]
+    # follow-up on the same thread keeps history
+    with client.stream(
+        "POST",
+        f"/api/deals/{demo['id']}/chat",
+        json={"message": "And what about DSCR in the downside case?", "thread_id": threads[0]["id"]},
+    ) as resp:
+        assert resp.status_code == 200
+        list(resp.iter_text())
+    assert client.get(f"/api/deals/{demo['id']}/chat/threads/{threads[0]['id']}").json()["message_count"] == 4

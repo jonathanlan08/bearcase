@@ -36,6 +36,7 @@ The transition from Ink to Paper *is* the product story: the site dramatizes wha
 - No cartoon bear, no stock-market bear, no bull/bear iconography. "Bear" lives in the name only; the symbol is an evidence link.
 - No imitation of Apple layouts, assets, or typography.
 - No motion for its own sake: if an animation does not explain a relationship or confirm an action, remove it.
+- No eyebrow labels, section numbers, decorative middle-dot strips, or scroll cues. Headings carry their own weight.
 - Status is never conveyed by color alone (see `accessibility.md`).
 
 ## 5. Brand system summary
@@ -43,7 +44,7 @@ The transition from Ink to Paper *is* the product story: the site dramatizes wha
 - **Wordmark:** `BearCase` in Geist Medium, tracking −0.02em. "AI" is never set in the wordmark; it appears as a mono micro-label (`AI · DILIGENCE`) where context needs it.
 - **Symbol — the Evidence Link:** two small filled squares (source, claim) on a diagonal, joined by a hairline with a hollow node at the midpoint (the core). Legible at 16px. Used as favicon, in navigation, and as the loading indicator (the line draws itself).
 - **Palette:** see `design-system.md`. Ink `#07080A` ↔ Paper `#F5F2EC`. Accent *Signal* `#7FB2FF` (on ink) / `#2B6CD9` (on paper). Status: supported = signal, review required = amber, contradicted = red, unsupported = graphite.
-- **Type:** Instrument Serif (display; italic for emphasis words), Geist (UI/body), Geist Mono (numbers, labels, citations).
+- **Type:** one family. Geist at 600 with tight tracking for display and headings, Geist at 400/500 for UI and body, Geist Mono only for numbers and citations. No serif, no italic accent words, no uppercase eyebrow labels.
 - **Signature motif:** the citation hairline — a 1px line from a claim to its evidence with a small square terminal at the source end.
 
 ## 6. Voice

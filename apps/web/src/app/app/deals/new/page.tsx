@@ -70,8 +70,7 @@ export default function NewDealPage() {
     <div>
       <header className="flex h-14 items-center justify-between border-b border-hairline bg-bg-raised px-4 md:px-6"><Link href="/app"><Wordmark /></Link><Link href="/app" className="text-sm text-fg-muted hover:text-fg">All deals</Link></header>
       <main id="main" className="mx-auto max-w-xl px-4 py-8 md:px-6">
-        <p className="micro">New deal</p>
-        <h1 className="mt-1 text-3xl">Create a deal</h1>
+        <h1 className="text-[30px]">Create a deal</h1>
         <p className="mt-2 text-sm text-fg-muted">Enter the transaction terms. You will upload documents next.</p>
         {errorList.length > 0 && (
           <div id="form-errors" tabIndex={-1} role="alert" className="mt-6 rounded-[var(--radius-2)] border border-red/40 p-3 text-sm">

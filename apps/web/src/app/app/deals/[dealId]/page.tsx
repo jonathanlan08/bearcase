@@ -28,7 +28,7 @@ export default function OverviewPage() {
     <div>
       <PageHeader kicker={kicker} title="Deal overview" actions={
         <>
-          {d.active_jobs > 0 && <span className="micro text-amber" aria-live="polite">{d.active_jobs} job{d.active_jobs > 1 ? "s" : ""} running…</span>}
+          {d.active_jobs > 0 && <span className="text-xs font-medium text-amber" aria-live="polite">{d.active_jobs} job{d.active_jobs > 1 ? "s" : ""} running…</span>}
           <Button variant="secondary" size="sm" onClick={() => process.mutate(true, { onSuccess: () => toast({ title: "Reprocessing queued", description: "Documents will be parsed and analysed again." }) })} loading={process.isPending} disabled={noDocs}>Re-run analysis</Button>
         </>
       } />
@@ -85,7 +85,7 @@ export default function OverviewPage() {
                 <li key={f.id} className="flex items-start gap-3 py-2 text-sm">
                   <SeverityChip severity={f.severity} />
                   <div className="min-w-0 flex-1"><p className="font-medium">{f.title}</p><p className="mt-0.5 line-clamp-2 text-fg-muted">{f.detail}</p></div>
-                  <span className="micro shrink-0 text-[10px]">{titleCase(f.kind)}</span>
+                  <span className="shrink-0 text-[11px] text-fg-muted">{titleCase(f.kind)}</span>
                 </li>
               ))}
             </ul>

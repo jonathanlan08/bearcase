@@ -16,7 +16,7 @@ Read `HANDOFF.md` first for current state, then `docs/design/` (visual source of
 6. Scenario results are immutable; re-running creates a new run with its own snapshot and hash.
 7. Reports fail validation if a material statement lacks a resolvable citation or derivation.
 8. Status is never conveyed by color alone in the UI (glyph + label).
-9. Ask the Deal answers only from persisted rows; uncited factual sentences are dropped (`api/routes/questions.py`).
+9. Chat and Q&A answer only through tools over persisted rows; citation markers are validated in code (`chat/service.py`, `api/routes/questions.py`).
 
 ## Layout
 - `apps/api/src/bearcase/{engine,ingest,ai,pipeline,reports,api}` — see `docs/architecture.md`

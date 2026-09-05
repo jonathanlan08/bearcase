@@ -45,7 +45,7 @@ export function StatusGlyph({ status, size = 14, className = "" }: { status: str
 export function StatusChip({ status, size = "md", className = "" }: { status: string; size?: "sm" | "md"; className?: string }) {
   const tone = TONE[status] ?? "text-graphite";
   return (
-    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-hairline bg-bg-raised ${size === "sm" ? "h-5 px-1.5 text-[11px]" : "h-6 px-2 text-xs"} font-medium ${tone} ${className}`}>
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-1)] border border-hairline bg-bg-raised ${size === "sm" ? "h-5 px-1.5 text-[11px]" : "h-6 px-2 text-xs"} font-medium ${tone} ${className}`}>
       <StatusGlyph status={status} size={size === "sm" ? 11 : 13} />
       <span className="text-fg">{STATUS_LABEL[status] ?? status}</span>
     </span>

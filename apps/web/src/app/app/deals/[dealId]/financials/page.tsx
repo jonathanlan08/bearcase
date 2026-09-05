@@ -51,7 +51,7 @@ export default function FinancialsPage() {
                 <tr key={a.id}>
                   <td className={td}><p className="font-medium">{a.label}</p>{a.seller_rationale && <p className="mt-0.5 text-xs text-fg-muted">Seller: {a.seller_rationale}</p>}</td>
                   <td className={`${td} num text-right`}>{fmtMoney(a.amount)}</td>
-                  <td className={td}><StatusChip status={a.decision} />{a.decided_by_user_id && <p className="micro mt-1 text-[10px] text-accent">reviewer</p>}</td>
+                  <td className={td}><StatusChip status={a.decision} />{a.decided_by_user_id && <p className="mt-1 text-[11px] font-medium text-accent">reviewer decision</p>}</td>
                   <td className={`${td} text-xs`}>{a.decision_rationale}<p className="mt-1 font-mono text-[10px] text-fg-muted">rule: {a.decision_rule}</p></td>
                   <td className={td}><span className="inline-flex flex-wrap gap-1">{a.evidence_ids.slice(0, 4).map((e) => <EvidenceCite key={e} dealId={dealId} id={e} onOpen={setViewer} />)}</span></td>
                   <td className={td}><Button size="sm" variant="ghost" onClick={() => setDecide(a.id)}>Decide…</Button></td>
@@ -95,7 +95,7 @@ function StatementTable({ f, onCite }: { f: Financials; onCite: (eid: string) =>
               {f.periods.map((p) => { const m = byKey.get(`${key}|${p.label}`); return <td key={p.id} className={`${td} num text-right`}>{m ? <button type="button" className="rounded-[2px] hover:bg-accent/10 hover:underline" title={`Cell ${String(m.input_snapshot.cell ?? "")}: click to open`} onClick={() => m.evidence_ids[0] && onCite(m.evidence_ids[0])}>{fmtMoney(m.value)}{m.requires_review && <StatusGlyph status="review_required" size={10} className="ml-1 inline" />}</button> : <span className="text-fg-muted">—</span>}</td>; })}
             </tr>
           ))}
-          <tr><td className={`${td} pt-4 micro`} colSpan={f.periods.length + 1}>Calculated by the engine</td></tr>
+          <tr><td className={`${td} pt-4 text-xs font-medium text-fg-muted`} colSpan={f.periods.length + 1}>Calculated by the engine</td></tr>
           {CALC.map(([key, label, unit]) => (
             <tr key={key}>
               <td className={td}>{label}</td>
@@ -113,7 +113,7 @@ function MetricCard({ m, label, onCite }: { m: Metric; label: string; onCite: (e
   const tone = m.key.includes("verified") ? "text-accent" : m.key.includes("seller") ? "text-graphite" : "";
   return (
     <div className="rounded-[var(--radius-3)] border border-hairline bg-bg-raised p-4">
-      <div className="flex items-start justify-between gap-2"><p className="text-sm text-fg-muted">{label}</p><span className="micro text-[10px]">{m.source}</span></div>
+      <div className="flex items-start justify-between gap-2"><p className="text-sm text-fg-muted">{label}</p><span className="text-[11px] text-fg-muted">{m.source}</span></div>
       <p className={`num mt-1 text-2xl ${tone}`}>{fmtValue(m.value, m.unit)}{m.requires_review && <StatusGlyph status="review_required" size={12} className="ml-2 inline align-middle" />}</p>
       {m.missing_inputs.length > 0 && <p className="mt-1 text-xs text-amber">Missing: {m.missing_inputs.join(", ")}</p>}
       <details className="mt-2 text-xs">

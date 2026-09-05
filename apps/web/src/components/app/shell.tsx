@@ -10,7 +10,7 @@ import { useDeal, useDeals, useSummary, qk } from "@/components/app/hooks";
 import { useMe } from "@/components/app/gate";
 import { Wordmark } from "@/components/ui/primitives";
 import { DropdownMenu } from "radix-ui";
-import { AskTheDeal } from "@/components/domain/ask-the-deal";
+import { DealChat } from "@/components/domain/deal-chat";
 
 const PRIMARY = [
   { key: "documents", label: "Deal Room", n: "01", Icon: FolderOpen },
@@ -43,7 +43,7 @@ export function DealShell({ children }: { children: React.ReactNode }) {
   const NavLink = ({ href, label, n, Icon, active }: { href: string; label: string; n?: string; Icon: React.ComponentType<{ size?: number }>; active: boolean }) => (
     <Link href={href} aria-current={active ? "page" : undefined} title={collapsed ? label : undefined} className={`group flex h-10 items-center gap-3 rounded-[var(--radius-2)] px-2.5 text-sm transition-colors duration-[120ms] ${active ? "bg-bg-muted font-medium text-fg" : "text-fg-muted hover:bg-bg-muted hover:text-fg"}`}>
       <Icon size={16} />
-      {!collapsed && (<><span className="flex-1 truncate">{label}</span>{n && <span className="micro text-[10px] text-fg-muted">{n}</span>}</>)}
+      {!collapsed && <span className="flex-1 truncate">{label}</span>}{n ? null : null}
     </Link>
   );
 
@@ -82,7 +82,7 @@ export function DealShell({ children }: { children: React.ReactNode }) {
         <div className="mt-auto flex flex-col gap-2 p-3">
           {!collapsed && mode && (
             <div className="rounded-[var(--radius-2)] border border-hairline p-2">
-              <p className="micro">{mode.provider === "anthropic" ? "Anthropic" : "Mock AI"}</p>
+              <p className="text-xs font-medium">{mode.provider === "anthropic" ? "Live model" : "Rule-based mock"}</p>
               <p className="mt-0.5 truncate font-mono text-[11px] text-fg-muted">{mode.model}</p>
             </div>
           )}
@@ -96,7 +96,7 @@ export function DealShell({ children }: { children: React.ReactNode }) {
           <span className="min-w-0 flex-1 truncate text-sm font-medium">{deal.data?.company_name}</span>
         </header>
         <main id="main" className="flex-1 pb-20 md:pb-0">{children}</main>
-        <AskTheDeal dealId={dealId} />
+        <DealChat dealId={dealId} />
         <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-hairline bg-bg-raised pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Primary">
           {PRIMARY.map(({ key, label, Icon }) => (
             <Link key={key} href={`${base}/${key}`} aria-current={isActive(key) ? "page" : undefined} className={`flex h-14 flex-col items-center justify-center gap-1 text-[10px] ${isActive(key) ? "text-fg font-medium" : "text-fg-muted"}`}>
@@ -114,8 +114,8 @@ export function PageHeader({ title, kicker, actions, children }: { title: string
     <div className="border-b border-hairline bg-bg px-4 py-5 md:px-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          {kicker && <p className="micro">{kicker}</p>}
-          <h1 className="mt-1 text-3xl md:text-[34px]" tabIndex={-1}>{title}</h1>
+          {kicker && <p className="text-sm text-fg-muted">{kicker}</p>}
+          <h1 className="mt-1 text-[26px] md:text-[30px]" tabIndex={-1}>{title}</h1>
         </div>
         {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </div>
@@ -128,7 +128,7 @@ export function useDealKicker(): string {
   const { dealId } = useParams<{ dealId: string }>();
   const deal = useDeal(dealId);
   if (!deal.data) return "";
-  return `${deal.data.company_name}${deal.data.is_demo ? " · fictional" : ""}`.toUpperCase();
+  return `${deal.data.company_name}${deal.data.is_demo ? " (fictional demonstration deal)" : ""}`;
 }
 
 export { qk };

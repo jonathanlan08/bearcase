@@ -53,7 +53,7 @@ export function SiteFooter() {
           <p className="mt-3 max-w-xs text-sm text-fg-muted">AI-assisted acquisition diligence and investment-committee red-team review. Open source, MIT licensed.</p>
         </div>
         <div>
-          <p className="micro">Product</p>
+          <p className="text-sm font-semibold">Product</p>
           <ul className="mt-3 flex flex-col gap-2 text-sm">
             <li><Link href="/demo" className="hover:underline">Explore the demo</Link></li>
             <li><Link href="/methodology" className="hover:underline">Methodology</Link></li>
@@ -61,9 +61,9 @@ export function SiteFooter() {
           </ul>
         </div>
         <div>
-          <p className="micro">Disclosure</p>
+          <p className="text-sm font-semibold">Disclosure</p>
           <p className="mt-3 text-sm text-fg-muted">Northstar HVAC Services and every person, customer, contract, lender, and number in the demo are fictional. BearCase is an educational prototype and does not provide financial, legal, tax, or investment advice.</p>
-          <p className="mt-3 font-mono text-[11px] text-fg-muted">Runs with a deterministic mock provider by default; the Anthropic API is optional.</p>
+          <p className="mt-3 text-xs text-fg-muted">Runs with a deterministic rule-based provider by default. Add an Anthropic key for the live model.</p>
         </div>
       </div>
     </footer>

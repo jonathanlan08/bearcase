@@ -40,7 +40,7 @@ export default function ScenariosPage() {
       <PageHeader kicker={kicker} title="Scenario Lab" actions={<Button variant="secondary" size="sm" icon={<Plus size={14} />} onClick={() => create.mutate()} loading={create.isPending}>New scenario</Button>}>
         <div className="mt-4 flex flex-wrap gap-1" role="tablist" aria-label="Scenarios">
           {scenarios.data.map((s) => { const b = s.latest_result?.warnings.some((w) => w.code === "covenant_breach"); const w = s.latest_result?.warnings.some((x) => x.code === "covenant_warning"); return (
-            <button key={s.id} role="tab" aria-selected={sc?.id === s.id} onClick={() => setSel(s.id)} className={`inline-flex h-9 items-center gap-2 rounded-full border px-3 text-sm ${sc?.id === s.id ? "border-fg bg-fg text-bg" : "border-hairline hover:bg-bg-muted"}`}>
+            <button key={s.id} role="tab" aria-selected={sc?.id === s.id} onClick={() => setSel(s.id)} className={`inline-flex h-9 items-center gap-2 rounded-[var(--radius-2)] border px-3 text-sm ${sc?.id === s.id ? "border-fg bg-fg text-bg" : "border-hairline hover:bg-bg-muted"}`}>
               <StatusGlyph status={b ? "breach" : w ? "warning" : s.latest_result ? "supported" : "pending"} size={11} />{s.name}<span className="num text-xs opacity-70">{fmtX(s.latest_result?.outputs.year1.dscr ?? null)}</span>
             </button>
           ); })}
@@ -99,7 +99,7 @@ function AssumptionsPanel({ dealId, scenario, specs, running, onRun }: { dealId:
   const dirty = scenario.assumptions.some((a) => Number(a.value) !== Number(draft[a.key]));
   const save = useMutation({ mutationFn: () => api.put<Scenario>(`/api/deals/${dealId}/scenarios/${scenario.id}/assumptions`, { values: draft }), onSuccess: () => qc.invalidateQueries({ queryKey: qk.scenarios(dealId) }), onError: (e) => toast({ title: "Invalid assumption", description: String(e), tone: "error" }) });
   return (
-    <Panel title={<span className="flex items-center gap-2">Assumptions {dirty && <span className="micro text-[10px] text-amber">draft</span>}</span>} actions={<Button size="sm" icon={<Play size={14} />} onClick={() => onRun(draft, dirty)} loading={running}>Run scenario</Button>}>
+    <Panel title={<span className="flex items-center gap-2">Assumptions {dirty && <span className="text-xs font-medium text-amber">unsaved changes</span>}</span>} actions={<Button size="sm" icon={<Play size={14} />} onClick={() => onRun(draft, dirty)} loading={running}>Run scenario</Button>}>
       {scenario.description && <p className="mb-3 text-xs text-fg-muted">{scenario.description}</p>}
       <div className="flex flex-col gap-4">
         {specs.map((spec) => <AssumptionControl key={spec.key} spec={spec} value={draft[spec.key] ?? ""} onChange={(v) => setDraft({ ...draft, [spec.key]: v })} />)}

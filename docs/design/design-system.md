@@ -52,13 +52,13 @@ Series palette (order): `signal`, `graphite`, `amber`, `red`. Seller-stated valu
 
 | Role | Family | Size / line | Weight | Tracking |
 |---|---|---|---|---|
-| Hero display | Instrument Serif | `clamp(44px, 7.5vw, 104px)` / 0.98 | 400 | −0.015em |
-| H1 | Instrument Serif | 40 / 44 (mobile 32 / 36) | 400 | −0.01em |
-| H2 | Instrument Serif | 32 / 38 | 400 | −0.01em |
+| Hero display | Geist | 40 / 76px, line 1.02 | 600 | −0.035em |
+| H1 | Geist | 30 (mobile 26) | 600 | −0.03em |
+| H2 | Geist | 30 / 36 | 600 | −0.03em |
 | H3 | Geist | 20 / 28 | 500 | −0.01em |
 | Body | Geist | 16 / 24 (site 17 / 27) | 400 | 0 |
 | Small | Geist | 14 / 20 | 400 | 0 |
-| Micro label | Geist Mono | 12 / 16 | 500 | +0.08em, uppercase |
+| Small label | Geist | 12 / 16 | 500 | 0, sentence case |
 | Numeric | Geist Mono | inherits | 400/500 | 0, `tabular-nums` |
 | Citation chip | Geist Mono | 12 / 16 | 500 | 0 |
 
@@ -73,7 +73,7 @@ Rules: numbers in tables are always Geist Mono tabular; currency uses `$12.95M` 
 
 ## 4. Shape and depth
 
-- Radii: `r-1` 2px (inputs, chips), `r-2` 6px (cards), `r-3` 10px (panels, dialogs). No pills except status chips (`r-full`).
+- Radii: one scale, `r-1` 4px (inputs, chips), `r-2` 6px (cards, buttons), `r-3` 8px (panels, dialogs). No pills.
 - Borders: 1px hairlines (`paper-200` on paper, `ink-600` on ink). Hairlines carry structure; shadows do not.
 - Shadows: app only — `shadow-1: 0 1px 2px rgba(13,15,18,.06)`, `shadow-2: 0 8px 24px rgba(13,15,18,.10)` for menus and dialogs. Site: none.
 - Focus ring: 2px `signal` outline offset 2px, on every operable element.

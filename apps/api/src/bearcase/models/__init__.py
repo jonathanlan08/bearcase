@@ -1,6 +1,8 @@
 from bearcase.models.core import (
     Adjustment,
     AuditEvent,
+    ChatMessage,
+    ChatThread,
     Claim,
     ClaimEvidenceLink,
     Deal,
@@ -28,6 +30,8 @@ from bearcase.models.enums import *  # noqa: F403
 __all__ = [
     "Adjustment",
     "AuditEvent",
+    "ChatMessage",
+    "ChatThread",
     "Claim",
     "ClaimEvidenceLink",
     "Deal",

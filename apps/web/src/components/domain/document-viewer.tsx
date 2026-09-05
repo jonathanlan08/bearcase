@@ -48,7 +48,7 @@ function ViewerBody({ dealId, target }: { dealId: string; target: ViewerTarget }
           <div className="flex h-14 items-center gap-3 border-b border-hairline px-4">
             <div className="min-w-0 flex-1">
               <Dialog.Title className="truncate text-sm font-medium">{target.documentName ?? "Document"}</Dialog.Title>
-              <p className="micro text-[10px]">{target.locator ? `Locator: ${fmtLocator(target.locator)}` : "Source document"}</p>
+              <p className="text-[11px] text-fg-muted">{target.locator ? `Locator ${fmtLocator(target.locator)}` : "Source document"}</p>
             </div>
             {keys.length > 1 && (
               <label className="flex items-center gap-2 text-xs text-fg-muted">Section
@@ -65,7 +65,7 @@ function ViewerBody({ dealId, target }: { dealId: string; target: ViewerTarget }
             {q.isError && <p className="text-sm text-red">Could not load the document.</p>}
             {keys.filter((k) => filter === "all" || k === filter).map((k) => (
               <section key={k} className="mb-6">
-                <h3 className="micro mb-2">{k}</h3>
+                <h3 className="mb-2 text-xs font-semibold text-fg-muted">{k}</h3>
                 <div className="flex flex-col gap-1.5">
                   {(groups.get(k) ?? []).map((e) => {
                     const hit = highlight.has(e.id);
@@ -75,7 +75,7 @@ function ViewerBody({ dealId, target }: { dealId: string; target: ViewerTarget }
                         <div className="mb-1 flex flex-wrap items-center gap-2">
                           <span className="font-mono text-[11px] text-fg-muted">{fmtLocator(e.locator, e.kind)}</span>
                           {e.contains_instruction_text && <span className="rounded-[var(--radius-1)] border border-amber px-1.5 font-mono text-[10px] uppercase tracking-wider text-amber">inert instruction text</span>}
-                          {hit && <span className="micro text-[10px] text-accent">cited</span>}
+                          {hit && <span className="text-[11px] font-medium text-accent">cited</span>}
                         </div>
                         {e.kind === "sheet_row" && e.structured?.values ? (
                           <div className="scroll-x"><table className="text-xs"><tbody><tr>{(e.structured.values as string[]).map((v, i) => <td key={i} className={`border border-hairline px-2 py-1 ${i > 0 ? "num text-right" : ""}`}>{v}</td>)}</tr></tbody></table></div>

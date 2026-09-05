@@ -27,8 +27,7 @@ export default function MethodologyPage() {
     <div data-world="ink" className="min-h-svh bg-bg text-fg">
       <SiteNav />
       <main id="main" className="mx-auto max-w-3xl px-6 pb-24 pt-32">
-        <p className="micro">Methodology</p>
-        <h1 className="mt-3 text-5xl">How BearCase decides what is true.</h1>
+        <h1 className="text-[44px] leading-[1.05] md:text-[56px]">How BearCase decides what is true.</h1>
         <p className="mt-6 text-lg text-fg-muted">Two systems share the work. A language model reads and compares; deterministic code counts. Neither is allowed to do the other&apos;s job.</p>
 
         <h2 className="mt-16 text-3xl">Claim statuses</h2>
@@ -41,8 +40,8 @@ export default function MethodologyPage() {
 
         <h2 className="mt-16 text-3xl">What the model does, what code does</h2>
         <div className="mt-6 grid gap-6 sm:grid-cols-2 text-sm">
-          <div><p className="micro mb-2">Model (Anthropic API or the rule-based mock)</p><ul className="list-disc space-y-1 pl-5 text-fg-muted"><li>Classify documents</li><li>Extract material claims with a source chunk</li><li>Rank and compare retrieved evidence</li><li>Draft questions, conditions, and narrative</li><li>Explain persisted calculation outputs</li></ul></div>
-          <div><p className="micro mb-2">Deterministic code</p><ul className="list-disc space-y-1 pl-5 text-fg-muted"><li>Validate and hash uploads; never execute content</li><li>Map statements with cell provenance</li><li>Every financial formula below</li><li>Scenario projections and immutable snapshots</li><li>Citation existence and report validation</li><li>Authorization, state machines, audit history</li></ul></div>
+          <div><p className="mb-2 text-sm font-semibold">The model (Claude, or the rule-based mock)</p><ul className="list-disc space-y-1 pl-5 text-fg-muted"><li>Classify documents</li><li>Extract material claims with a source chunk</li><li>Rank and compare retrieved evidence</li><li>Draft questions, conditions, and narrative</li><li>Explain persisted calculation outputs</li></ul></div>
+          <div><p className="mb-2 text-sm font-semibold">Deterministic code</p><ul className="list-disc space-y-1 pl-5 text-fg-muted"><li>Validate and hash uploads; never execute content</li><li>Map statements with cell provenance</li><li>Every financial formula below</li><li>Scenario projections and immutable snapshots</li><li>Citation existence and report validation</li><li>Authorization, state machines, audit history</li></ul></div>
         </div>
 
         <h2 className="mt-16 text-3xl">Formula contract</h2>

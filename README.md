@@ -34,7 +34,7 @@ BearCase is not a document chatbot. Its primary object is a claim ledger with ev
 - Report validation: material statements must cite evidence or a calculation, or the report fails
 - Anthropic provider behind an interface plus a deterministic rule-based mock that needs no API key
 - Prompt-injection fixtures stored as inert document text and surfaced as findings
-- **Ask the Deal**: citation-first Q&A ("Why was adjusted EBITDA reduced?") answered only from persisted rows; every factual sentence cites evidence or a calculation, uncited sentences are removed, and each answer is stored with provider, prompt version, and an audit event
+- **Ask the deal**: a streaming chat with Claude that answers only through tools over persisted rows (claim ledger, verified metrics, add-back decisions, scenario results, findings, document search). Citations in the reply are validated in code and rendered as clickable source chips; conversations are stored per deal. Without an API key the same chat runs on the deterministic rule-based composer
 - Evaluation harness scoring extraction recall, status accuracy, contradiction precision, citation resolution, injection resistance, determinism, report validation, and Q&A grounding
 
 ## The fictional demonstration
@@ -74,6 +74,8 @@ BEARCASE_AI_PROVIDER=anthropic BEARCASE_AI_MODEL=claude-opus-5 ANTHROPIC_API_KEY
 ```
 
 Output is validated against versioned Pydantic schemas before persistence; prompt, schema, model, and run id are stored with every extraction. Numeric verification stays in code in both modes.
+
+The chat ("Ask the deal", ⌘/ inside a deal) switches to the live model as soon as an Anthropic key is present in the API's environment, even if extraction stays on the mock provider. It runs a tool-use loop (`apps/api/src/bearcase/chat/tools.py`), streams Server-Sent Events, and every `[E:…]`/`[M:…]` citation is checked against the deal's evidence and metrics before the reply is stored.
 
 ### Docker Compose (PostgreSQL + MinIO + worker)
 
