@@ -8,25 +8,38 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from bearcase.api.deps import DbDep, DealDep, UserDep
-from bearcase.chat.providers import MOCK_BACKEND, REGISTRY, public_options, resolve_chat_backend
+from bearcase.chat.providers import (
+    MOCK_BACKEND,
+    REGISTRY,
+    models_for,
+    public_options,
+    resolve_chat_backend,
+    validate_model_id,
+)
 from bearcase.chat.service import stream_reply
 from bearcase.config import get_settings
 from bearcase.models import ChatThread
 
 router = APIRouter(tags=["chat"])
 
+# A mix of deal questions and general ones: the assistant answers both, and the labels differ by scope.
 SUGGESTED = [
     "Why was adjusted EBITDA reduced?",
-    "Where does the 18% growth claim come from?",
+    "What are the biggest risks?",
+    "Explain DSCR like I'm new to this",
+    "Draft five questions for the seller about customer concentration",
     "What happens to DSCR if we lose the largest customer?",
     "Which documents are missing?",
-    "What are the biggest risks?",
 ]
 
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     thread_id: uuid.UUID | None = None
+    model: str | None = Field(
+        default=None,
+        description="Model id for this request: one of the ids the chat config endpoint lists for the connected provider.",
+    )
 
 
 def _thread_out(t: ChatThread) -> dict:
@@ -44,7 +57,7 @@ def _message_out(m) -> dict:  # type: ignore[no-untyped-def]
         "id": str(m.id),
         "role": m.role,
         "content": m.content,
-        "citations": m.citations or {},
+        "citations": {"evidence": [], "metrics": [], **(m.citations or {})},
         "tool_calls": m.tool_calls or [],
         "grounded": m.grounded,
         "provider": m.provider,
@@ -87,6 +100,7 @@ def config(deal: DealDep) -> dict:
         "live": backend.kind != "mock",
         "note": note,
         "suggested": SUGGESTED,
+        "models": models_for(backend, s),
         "options": public_options(),
     }
 
@@ -126,6 +140,16 @@ def delete_thread(deal: DealDep, thread_id: uuid.UUID, db: DbDep, user: UserDep)
 @router.post("/deals/{deal_id}/chat")
 def chat(deal: DealDep, body: ChatRequest, db: DbDep, user: UserDep) -> StreamingResponse:
     """Server-Sent Events: meta, tool, text, citations, done, error."""
+    if body.model is not None:
+        if not validate_model_id(body.model):
+            raise HTTPException(400, "Unknown model id.")
+        s = get_settings()
+        resolved = resolve_chat_backend(s)
+        backend = resolved if resolved.ready else MOCK_BACKEND
+        # A live backend only ever runs an id the config endpoint offered, so a request cannot bill the
+        # operator's key for an arbitrary model. The rule-based composer ignores the field.
+        if backend.kind != "mock" and body.model not in models_for(backend, s):
+            raise HTTPException(400, "Model is not offered for the connected provider.")
     if body.thread_id:
         t = db.scalar(
             select(ChatThread).where(
@@ -138,7 +162,7 @@ def chat(deal: DealDep, body: ChatRequest, db: DbDep, user: UserDep) -> Streamin
         t = ChatThread(deal_id=deal.id, user_id=user.id)
         db.add(t)
         db.commit()
-    gen = stream_reply(db, deal, t, user.id, body.message.strip())
+    gen = stream_reply(db, deal, t, user.id, body.message.strip(), model=body.model)
     return StreamingResponse(
         gen,
         media_type="text/event-stream",

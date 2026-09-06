@@ -34,7 +34,7 @@ BearCase is not a document chatbot. Its primary object is a claim ledger with ev
 - Report validation: material statements must cite evidence or a calculation, or the report fails
 - Anthropic provider behind an interface plus a deterministic rule-based mock that needs no API key
 - Prompt-injection fixtures stored as inert document text and surfaced as findings
-- **Ask the deal**: a streaming chat that answers only through tools over persisted rows (claim ledger, verified metrics, add-back decisions, scenario results, findings, document search). Citations in the reply are validated in code and rendered as clickable source chips; conversations are stored per deal. Works with Anthropic, OpenAI, Google Gemini, Groq, OpenRouter, a local Ollama, or any OpenAI-compatible server; without a key the same chat runs on the deterministic rule-based composer
+- **Ask the deal**: a streaming chat that works like a general assistant and also knows the deal. General questions (finance and M&A concepts, writing, code, anything else) are answered directly, in Markdown. Facts about the deal come only through eight read-only tools over persisted rows (claim ledger, verified metrics, add-back decisions, scenario results, findings, document search) and carry citations that are validated in code and rendered as clickable source chips. Every reply is labelled by scope (deal evidence or general answer) and any paragraph with an uncited figure is flagged whatever the scope, replies can be copied or regenerated, and conversations are stored per deal. Works with Anthropic, OpenAI, Google Gemini, Groq, OpenRouter, a local Ollama, or any OpenAI-compatible server, with a model picker for the connected provider; without a key the same chat runs on the deterministic rule-based composer
 - Evaluation harness scoring extraction recall, status accuracy, contradiction precision, citation resolution, injection resistance, determinism, report validation, and Q&A grounding
 
 ## The fictional demonstration
@@ -67,7 +67,7 @@ Open http://localhost:3000 and choose **Explore the demo**. The API docs are at 
 
 ### Connecting a model
 
-The default is `mock`: no key, no network. A deterministic rule-based extractor and comparator runs over the real document text and drives the demo, tests, and evaluations offline; the chat runs on a rule-based composer over the same rows.
+The default is `mock`: no key, no network. A deterministic rule-based extractor and comparator runs over the real document text and drives the demo, tests, and evaluations offline; the chat runs on a rule-based composer over the same rows. The composer only answers deal questions; the general-assistant behaviour described below needs a live model.
 
 To put a live model behind the chat ("Ask the deal", ⌘/ inside a deal), add one key. With `BEARCASE_CHAT_PROVIDER=auto` (the default) the API uses the first key it finds, checking anthropic, openai, gemini, groq, openrouter, then ollama when `OLLAMA_HOST` is set. The free options come first in this table:
 
@@ -88,7 +88,20 @@ Three steps:
 2. Add one line, for example `GEMINI_API_KEY=...` (for Ollama, `OLLAMA_HOST=http://127.0.0.1:11434`).
 3. Restart the API with `make api` (or `make dev`).
 
-The chat header shows the provider and model that answered. `GET /api/deals/{id}/chat/config` returns the same, plus a plain-language note when a configured provider could not start; in that case the chat falls back to the composer instead of failing.
+The chat header shows the provider and model that answered. When a live provider is connected, the header also has a model picker with that provider's models, default first:
+
+| Provider | Models in the picker |
+|---|---|
+| Anthropic | `claude-haiku-4-5`, `claude-sonnet-5`, `claude-opus-5` |
+| OpenAI | `gpt-5.6-luna`, `gpt-5.6-terra`, `gpt-4.1-mini`, `gpt-4o-mini` |
+| Google Gemini | `gemini-3.8-flash`, `gemini-3.6-flash`, `gemini-3.5-flash-lite`, `gemini-2.5-flash`, `gemini-2.5-flash-lite` |
+| Groq | `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.6-27b`, `qwen/qwen3.8-27b` |
+| OpenRouter | `z-ai/glm-5.2:free`, `nvidia/nemotron-3-super-120b-a12b:free`, `minimax/minimax-m3:free`, `google/gemma-4-31b-it:free` |
+| Ollama | `qwen3:8b`, `qwen3:4b`, `llama3.1:8b`, `llama3.2:3b`, `mistral:7b`, `gpt-oss:20b` |
+| custom | the configured model only (`BEARCASE_CHAT_MODEL`) |
+| mock | `rules-v1` |
+
+If `BEARCASE_CHAT_MODEL` is set it appears first. The picked id is sent as `model` on `POST /api/deals/{id}/chat` and checked on the server: it must match `^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$` and, when a live provider is connected, be one of the ids in that provider's `models` list; anything else is a 400 (`Model is not offered for the connected provider.` for an id outside the list). The mock ignores the field. The id that answered is recorded on the stored messages. Lists change as providers retire models; a listed id the provider no longer knows produces a plain error in the chat rather than a crash. `GET /api/deals/{id}/chat/config` returns the provider, model, and the `models` list, plus a plain-language note when a configured provider could not start; in that case the chat falls back to the composer instead of failing.
 
 - Extraction and reports still use `BEARCASE_AI_PROVIDER` (`mock` or `anthropic`) with `BEARCASE_AI_MODEL`. Chat and extraction are independent: the chat can run on Gemini while extraction stays on the mock, or the other way round. To use Claude for extraction:
 
@@ -96,10 +109,14 @@ The chat header shows the provider and model that answered. `GET /api/deals/{id}
   BEARCASE_AI_PROVIDER=anthropic BEARCASE_AI_MODEL=claude-opus-5 ANTHROPIC_API_KEY=sk-ant-... make api
   ```
 
-- Every provider goes through the same eight read-only tools (`apps/api/src/bearcase/chat/tools.py`) and the same code-side citation validation: each `[E:…]`/`[M:…]` marker is checked against the deal's evidence and metrics before the reply is stored.
-- A model without tool calling falls back automatically to a grounded single-shot mode: code pre-fetches the persisted rows the tools would have returned, the model drafts from those, and the same citation validation applies.
+- With a live model the chat behaves like a general assistant: it answers general questions (finance concepts, writing, code, anything else) directly and in Markdown, and it also knows the deal. Deal facts come only from the eight read-only tools (`apps/api/src/bearcase/chat/tools.py`) and the same code-side citation validation applies to every provider: each `[E:…]`/`[M:…]` marker is checked against the deal's evidence and metrics before the reply is stored. Markers inside fenced code blocks or backtick spans are shown literally and are neither checked nor counted. The model is told not to compute new deal numbers (what-ifs go to the Scenario Lab), not to recommend buying, rejecting, or pricing the deal, and to phrase general knowledge as general rather than as deal evidence.
+- Every reply is labelled by scope and checked for grounding. The grounding check works per paragraph (blank-line separated): a paragraph that contains a figure (`$`, `%`, or a digit) must carry a citation marker. Heading lines and ordered-list numbers (`## 3 risks`, `1. Owner salary`) do not count as figures on their own, and code is skipped. `general` means nothing in the turn touched the deal or looked like a deal figure: no tool ran, no marker resolved, and no uncited figure appeared; the footer then reads "General answer, not from the deal room" in neutral terms. Any other reply is `deal`. A reply with an uncited figure is flagged in the footer ("Figures not cited from the deal room (N of M paragraphs cited)") whatever its scope, so a general explanation that slips in a specific figure is shown as uncited rather than as a general answer; a fully cited deal reply reads "Every factual paragraph cited". The scope and grounding flag are stored with the message and sent in the `citations` and `done` stream events.
+- Replies render Markdown (headings, lists, bold, tables, fenced code) with citation chips inline, and each reply has copy and regenerate actions. If the connection drops while a reply is streaming (closing the tab, stopping the request), the text received so far is stored with the error "Stopped before the reply finished." and can be regenerated; a stored reply with no text and no error shows "No reply was recorded."
+- A model without tool calling falls back automatically to a grounded single-shot mode: code pre-fetches the persisted rows the tools would have returned, the model drafts from those, and the same citation validation and scope label apply.
 - To pin a provider, set `BEARCASE_CHAT_PROVIDER` to one of `mock`, `anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `ollama`, `custom`; `BEARCASE_CHAT_MODEL` overrides the default model. For any other OpenAI-compatible server use `custom` with `BEARCASE_CHAT_BASE_URL` and `BEARCASE_CHAT_API_KEY` (https, except for loopback or private-network hosts); `custom` never borrows another provider's key. Setting `BEARCASE_CHAT_BASE_URL` next to a named provider's key routes that provider through your own gateway instead of its public endpoint, under the same https rule.
 - Keys are read from the environment or `.env` only; no endpoint returns them and they are not logged. `GOOGLE_API_KEY` is accepted as an alias for `GEMINI_API_KEY`, and `ANTHROPIC_AUTH_TOKEN` (read by the Anthropic SDK itself) counts as an Anthropic credential in auto mode.
+
+No live model has been exercised end to end in this repository's development environment (no key was available); the tool loop, the fallback, error mapping, and key handling are covered by tests with fake clients. If you connect a key and something looks off, the `chat/config` note and the chat's error text are the first places to look.
 
 Extraction output is validated against versioned Pydantic schemas before persistence; prompt, schema, model, and run id are stored with every extraction. Numeric verification stays in code in every mode.
 

@@ -24,3 +24,14 @@ export function useLocalFlag(key: string): [boolean, (v: boolean) => void] {
   const set = (v: boolean) => { try { localStorage.setItem(key, v ? "1" : "0"); } catch { /* ignore */ } emit(); };
   return [value, set];
 }
+
+/** localStorage-backed string as an external store; null when unset. Setting null removes the key. */
+export function useLocalString(key: string): [string | null, (v: string | null) => void] {
+  const value = useSyncExternalStore(
+    (cb) => { listeners.add(cb); window.addEventListener("storage", cb); return () => { listeners.delete(cb); window.removeEventListener("storage", cb); }; },
+    () => { try { return localStorage.getItem(key); } catch { return null; } },
+    () => null,
+  );
+  const set = (v: string | null) => { try { if (v === null) localStorage.removeItem(key); else localStorage.setItem(key, v); } catch { /* ignore */ } emit(); };
+  return [value, set];
+}

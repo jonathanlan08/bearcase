@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib.util
 import ipaddress
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -20,6 +21,9 @@ MOCK_LABEL = "Rule-based composer"
 MOCK_MODEL = "rules-v1"
 OLLAMA_DEFAULT_HOST = "http://127.0.0.1:11434"
 CUSTOM_LABEL = "Custom OpenAI-compatible"
+# Model ids travel from the browser to a provider and into ChatMessage.model (String(80)): one leading
+# alphanumeric, then the characters real ids use (dots, colons, slashes, dashes), 80 characters at most.
+MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$")
 
 
 @dataclass(frozen=True)
@@ -33,6 +37,9 @@ class ProviderSpec:
     free_tier: bool
     free_tier_note: str
     key_url: str
+    models: tuple[str, ...]
+    """Ids a user can pick in the chat panel, default first. A request may only name one of these (or
+    BEARCASE_CHAT_MODEL) for a live provider; see models_for and the chat route."""
 
 
 REGISTRY: dict[str, ProviderSpec] = {
@@ -46,6 +53,7 @@ REGISTRY: dict[str, ProviderSpec] = {
         free_tier=False,
         free_tier_note="No ongoing free tier: a small one-time trial credit, then prepaid credits (claude-haiku-4-5 is $1 per million input tokens).",
         key_url="https://platform.claude.com/settings/keys",
+        models=("claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5"),
     ),
     "openai": ProviderSpec(
         name="openai",
@@ -57,6 +65,7 @@ REGISTRY: dict[str, ProviderSpec] = {
         free_tier=False,
         free_tier_note="No free tier: prepaid credits from $5 (gpt-5.6-luna is $0.20 per million input tokens).",
         key_url="https://platform.openai.com/api-keys",
+        models=("gpt-5.6-luna", "gpt-5.6-terra", "gpt-4.1-mini", "gpt-4o-mini"),
     ),
     "gemini": ProviderSpec(
         name="gemini",
@@ -68,6 +77,7 @@ REGISTRY: dict[str, ProviderSpec] = {
         free_tier=True,
         free_tier_note="Free tier in Google AI Studio with no card; rate limits are per project and shown in AI Studio.",
         key_url="https://aistudio.google.com/apikey",
+        models=("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"),
     ),
     "groq": ProviderSpec(
         name="groq",
@@ -79,6 +89,7 @@ REGISTRY: dict[str, ProviderSpec] = {
         free_tier=True,
         free_tier_note="Free plan with no card: 30 requests/min, 1,000 requests/day, 8K tokens/min for gpt-oss-120b.",
         key_url="https://console.groq.com/keys",
+        models=("openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "qwen/qwen3.8-27b"),
     ),
     "openrouter": ProviderSpec(
         name="openrouter",
@@ -90,6 +101,12 @@ REGISTRY: dict[str, ProviderSpec] = {
         free_tier=True,
         free_tier_note="':free' models cost $0: 20 requests/min and 50/day (1,000/day after a one-time $10 credit purchase).",
         key_url="https://openrouter.ai/keys",
+        models=(
+            "z-ai/glm-5.2:free",
+            "nvidia/nemotron-3-super-120b-a12b:free",
+            "minimax/minimax-m3:free",
+            "google/gemma-4-31b-it:free",
+        ),
     ),
     "ollama": ProviderSpec(
         name="ollama",
@@ -101,6 +118,7 @@ REGISTRY: dict[str, ProviderSpec] = {
         free_tier=True,
         free_tier_note="Runs on this machine for free with no key; install Ollama and pull a model (qwen3:8b is about 5 GB).",
         key_url="https://ollama.com/download",
+        models=("qwen3:8b", "qwen3:4b", "llama3.1:8b", "llama3.2:3b", "mistral:7b", "gpt-oss:20b"),
     ),
     "custom": ProviderSpec(
         name="custom",
@@ -112,6 +130,7 @@ REGISTRY: dict[str, ProviderSpec] = {
         free_tier=False,
         free_tier_note="Depends on the server you point it at.",
         key_url="",
+        models=(),  # only the configured BEARCASE_CHAT_MODEL; see models_for
     ),
 }
 
@@ -174,9 +193,26 @@ def public_options() -> list[dict[str, Any]]:
             "free_tier_note": spec.free_tier_note,
             "default_model": spec.default_model,
             "key_url": spec.key_url,
+            "models": list(spec.models),
         }
         for spec in (REGISTRY[n] for n in OPTION_ORDER)
     ]
+
+
+def validate_model_id(value: str) -> bool:
+    """True when a model id sent by a client is safe to forward to a provider and store."""
+    return isinstance(value, str) and MODEL_ID.fullmatch(value) is not None
+
+
+def models_for(backend: ChatBackend, settings: Settings | None = None) -> list[str]:
+    """Model ids a user may pick for the backend that answers, default first. BEARCASE_CHAT_MODEL, when set,
+    leads the list, and the backend's current model is always present (custom servers list only that)."""
+    if backend.kind == "mock":
+        return [MOCK_MODEL]
+    s = settings or get_settings()
+    spec = REGISTRY.get(backend.name)
+    candidates = [s.chat_model or "", backend.model, *(spec.models if spec else ())]
+    return [m for m in dict.fromkeys(candidates) if m]
 
 
 def _is_private_host(host: str) -> bool:

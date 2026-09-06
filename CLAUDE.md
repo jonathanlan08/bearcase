@@ -16,7 +16,7 @@ Read `HANDOFF.md` first for current state, then `docs/design/` (visual source of
 6. Scenario results are immutable; re-running creates a new run with its own snapshot and hash.
 7. Reports fail validation if a material statement lacks a resolvable citation or derivation.
 8. Status is never conveyed by color alone in the UI (glyph + label).
-9. Chat and Q&A answer only through tools over persisted rows, for every provider (Anthropic or OpenAI-compatible); citation markers are validated in code (`chat/service.py`, `api/routes/questions.py`). Provider keys come from the environment/.env and are never returned or logged.
+9. Chat and Q&A: deal facts come only through tools over persisted rows and carry citation markers validated in code (`chat/service.py`, `api/routes/questions.py`); general-knowledge answers are allowed; a reply is scope=general only when no tool ran, no marker resolved, and no uncited figure appeared (an uncited figure is flagged whatever the scope), and general replies never become claims or metrics. Provider keys come from the environment/.env and are never returned or logged.
 
 ## Layout
 - `apps/api/src/bearcase/{engine,ingest,ai,pipeline,reports,api}` — see `docs/architecture.md`

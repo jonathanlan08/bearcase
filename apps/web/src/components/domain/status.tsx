@@ -1,11 +1,12 @@
 import type { ClaimStatus } from "@/lib/api";
 
-export type StatusKey = ClaimStatus | "warning" | "breach" | "accepted" | "rejected" | "ready" | "failed" | "queued" | "running" | "parsing" | "extracting" | "uploaded" | "succeeded" | "cancelled" | "pending";
+export type StatusKey = ClaimStatus | "warning" | "breach" | "accepted" | "rejected" | "ready" | "failed" | "queued" | "running" | "parsing" | "extracting" | "uploaded" | "succeeded" | "cancelled" | "pending" | "general";
 
 export const STATUS_LABEL: Record<string, string> = {
   supported: "Supported", contradicted: "Contradicted", unsupported: "Unsupported", review_required: "Review required", pending: "Pending",
   warning: "Below threshold", breach: "Covenant breach", accepted: "Accepted", rejected: "Rejected",
   ready: "Ready", failed: "Failed", queued: "Queued", running: "Running", parsing: "Parsing", extracting: "Extracting", uploaded: "Uploaded", succeeded: "Succeeded", cancelled: "Cancelled",
+  general: "General",
 };
 
 const TONE: Record<string, string> = {
@@ -13,6 +14,7 @@ const TONE: Record<string, string> = {
   contradicted: "text-red", breach: "text-red", rejected: "text-red", failed: "text-red",
   review_required: "text-amber", warning: "text-amber", running: "text-amber", parsing: "text-amber", extracting: "text-amber",
   unsupported: "text-graphite", pending: "text-graphite", queued: "text-graphite", uploaded: "text-graphite", cancelled: "text-graphite",
+  general: "text-graphite",
 };
 
 /** Shape + glyph + color. Never color alone. */
@@ -37,6 +39,9 @@ export function StatusGlyph({ status, size = 14, className = "" }: { status: str
       return (<svg {...common}><rect x="1.5" y="1.5" width="13" height="13" rx="1" stroke="currentColor" strokeWidth="1.6" fill="none" /><path d="M6.2 6.3a1.9 1.9 0 113 1.6c-.7.4-1.2.9-1.2 1.6M8 11.6v.3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" /></svg>);
     case "warning":
       return (<svg {...common}><path d="M8 1.8L15 14H1z" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinejoin="round" /><path d="M8 6v3.4M8 11.6v.3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>);
+    case "general":
+      // Neutral, informational: outlined hexagon with an "i". Not a claim status.
+      return (<svg {...common}><path d="M8 1.5l5.6 3.25v6.5L8 14.5l-5.6-3.25v-6.5z" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinejoin="round" /><path d="M8 7.2v4.2M8 4.6v.3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>);
     default:
       return (<svg {...common}><circle cx="8" cy="8" r="6.6" stroke="currentColor" strokeWidth="1.6" strokeDasharray="2.4 2.2" fill="none" /><path d="M5.2 8h5.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>);
   }

@@ -12,7 +12,7 @@ Last updated: 2026-09-06. Single-session build with Claude Fable 5.1 (no subagen
 | 3 Processing and AI pipeline | done — validation, parsers, classification, evidence, mock + Anthropic providers, retrieval, guardrails, injection detection |
 | 4 Claim Audit and Financial Verification | done — extraction, deterministic verification, add-back review, review decisions, audit events, UI |
 | 5 Scenario Lab and report | done — immutable runs, sensitivity grid, report assembly, citation validation, MD/PDF export, UI |
-| 5b Ask the deal | done — streaming chat (`chat_threads`, `chat_messages`, migration 3) with a tool-use loop over persisted rows for Anthropic and any OpenAI-compatible provider (`chat/providers.py` resolves the backend from keys in `.env`; `chat/openai_compat.py` runs the loop for Gemini, Groq, OpenRouter, Ollama, OpenAI, custom), a grounded no-tools fallback for models without tool calling, actionable provider errors with key redaction, and the rule-based composer when no key is present; the chat panel lists connectable providers free-first; single-shot Q&A endpoint retained |
+| 5b Ask the deal | done — streaming chat (`chat_threads`, `chat_messages`, migration 3) with a tool-use loop over persisted rows for Anthropic and any OpenAI-compatible provider (`chat/providers.py` resolves the backend from keys in `.env`; `chat/openai_compat.py` runs the loop for Gemini, Groq, OpenRouter, Ollama, OpenAI, custom), a grounded no-tools fallback for models without tool calling, actionable provider errors with key redaction, and the rule-based composer when no key is present. The assistant is now general-purpose and also knows the deal: general questions are answered in Markdown (rendered with citation chips inline); deal facts come only from the eight tools and carry validated `[E:…]`/`[M:…]` markers; `stream_reply` labels every reply with a scope (`deal` when a citation resolved or a tool ran, else `general`) stored in the citations payload and sent in the `citations` and `done` events, and the grounding flag applies to deal-scope replies; `POST /chat` accepts an optional `model` (regex-validated, 400 otherwise, applied only when the backend is live, recorded on the rows) and `GET /chat/config` returns a per-provider `models` list from `ProviderSpec.models` (also in each `options` entry); the panel has a model picker when live, copy and regenerate actions, and a scope label in the footer; suggested prompts mix deal and general questions; the mock composer is unchanged; single-shot Q&A endpoint retained. Live models remain unverified end to end here (no key) |
 | 6c Scene realism | done — transmission glass core with lit interior, paper with thickness and shading, procedural environment and contact shadows, soft additive particles, bloom and vignette by tier, camera dolly; both waterfall charts rebuilt as truncated-axis bridges |
 | 6b Design pass | done — removed serif display, eyebrows, section numbers, dot strips; one radius scale; landing sections use five distinct layouts; impeccable detector reports 0 findings |
 | 6 Landing page and polish | done — Ink/Paper design, Evidence Core scene with static fallback, methodology page |
@@ -22,10 +22,10 @@ Last updated: 2026-09-06. Single-session build with Claude Fable 5.1 (no subagen
 
 | Check | Result |
 |---|---|
-| `pytest` (apps/api) | 85 passed (40 cover chat backend resolution, the OpenAI-compatible loop with fake clients, the no-tools fallback, error mapping, and key non-disclosure) |
+| `pytest` (apps/api) | 123 passed (78 cover chat backend resolution, the OpenAI-compatible loop with fake clients, the no-tools fallback, error mapping, and key non-disclosure) |
 | `bearcase eval` (mock provider) | PASS, 12/12 checks (incl. Ask the Deal grounding); extraction recall 19/19; status accuracy 19/19; contradiction precision 6/6; 65/65 citations resolve; report v1 valid (36/36 material statements cited) |
 | `ruff check` / `ruff format --check` / `mypy src` | clean |
-| `vitest` (apps/web) | 11 passed |
+| `vitest` (apps/web) | 47 passed (Markdown renderer, chat panel scope labels, copy and regenerate, connect-a-model state) |
 | `tsc --noEmit` / `eslint` | clean |
 | `next build` | success (15 routes) |
 | Playwright smoke (chromium + mobile) | 6 passed |
