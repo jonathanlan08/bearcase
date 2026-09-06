@@ -15,6 +15,7 @@ os.environ["BEARCASE_DATABASE_URL"] = f"sqlite:///{Path(_TMP) / 'test.db'}"
 os.environ["BEARCASE_STORAGE_LOCAL_DIR"] = str(Path(_TMP) / "storage")
 os.environ["BEARCASE_JOB_RUNNER"] = "sync"
 os.environ["BEARCASE_AI_PROVIDER"] = "mock"
+os.environ["BEARCASE_CHAT_PROVIDER"] = "mock"  # a key in the repo-root .env must never make tests call a provider
 os.environ["BEARCASE_SECRET_KEY"] = "test-secret"
 
 from fastapi.testclient import TestClient  # noqa: E402

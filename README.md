@@ -34,7 +34,7 @@ BearCase is not a document chatbot. Its primary object is a claim ledger with ev
 - Report validation: material statements must cite evidence or a calculation, or the report fails
 - Anthropic provider behind an interface plus a deterministic rule-based mock that needs no API key
 - Prompt-injection fixtures stored as inert document text and surfaced as findings
-- **Ask the deal**: a streaming chat with Claude that answers only through tools over persisted rows (claim ledger, verified metrics, add-back decisions, scenario results, findings, document search). Citations in the reply are validated in code and rendered as clickable source chips; conversations are stored per deal. Without an API key the same chat runs on the deterministic rule-based composer
+- **Ask the deal**: a streaming chat that answers only through tools over persisted rows (claim ledger, verified metrics, add-back decisions, scenario results, findings, document search). Citations in the reply are validated in code and rendered as clickable source chips; conversations are stored per deal. Works with Anthropic, OpenAI, Google Gemini, Groq, OpenRouter, a local Ollama, or any OpenAI-compatible server; without a key the same chat runs on the deterministic rule-based composer
 - Evaluation harness scoring extraction recall, status accuracy, contradiction precision, citation resolution, injection resistance, determinism, report validation, and Q&A grounding
 
 ## The fictional demonstration
@@ -65,17 +65,43 @@ make dev              # API on :8000, web on :3000
 
 Open http://localhost:3000 and choose **Explore the demo**. The API docs are at http://localhost:8000/api/docs.
 
-### Mock mode and Anthropic mode
+### Connecting a model
 
-The default provider is `mock`: a deterministic rule-based extractor and comparator over the real document text. It drives the demo, tests, and evaluations offline. To use Claude:
+The default is `mock`: no key, no network. A deterministic rule-based extractor and comparator runs over the real document text and drives the demo, tests, and evaluations offline; the chat runs on a rule-based composer over the same rows.
 
-```bash
-BEARCASE_AI_PROVIDER=anthropic BEARCASE_AI_MODEL=claude-opus-5 ANTHROPIC_API_KEY=sk-ant-... make api
-```
+To put a live model behind the chat ("Ask the deal", ⌘/ inside a deal), add one key. With `BEARCASE_CHAT_PROVIDER=auto` (the default) the API uses the first key it finds, checking anthropic, openai, gemini, groq, openrouter, then ollama when `OLLAMA_HOST` is set. The free options come first in this table:
 
-Output is validated against versioned Pydantic schemas before persistence; prompt, schema, model, and run id are stored with every extraction. Numeric verification stays in code in both modes.
+| Provider | Env var | Free? | Default model | Get a key |
+|---|---|---|---|---|
+| Google Gemini | `GEMINI_API_KEY` | Yes, free tier without a card; per-project rate limits are shown in AI Studio | `gemini-3.8-flash` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| Groq | `GROQ_API_KEY` | Yes, free plan without a card; rate-limited per organization | `openai/gpt-oss-120b` | [console.groq.com/keys](https://console.groq.com/keys) |
+| OpenRouter | `OPENROUTER_API_KEY` | Yes, `:free` models cost nothing; a low daily request cap applies until you buy credits | `z-ai/glm-5.2:free` | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| Ollama (local) | `OLLAMA_HOST` | Yes, runs on your machine with no key; `qwen3:8b` is about 5 GB and suits 16 GB of RAM, use `qwen3:4b` on 8 GB | `qwen3:8b` | [ollama.com/download](https://ollama.com/download), then `ollama pull qwen3:8b` |
+| OpenAI | `OPENAI_API_KEY` | No, prepaid credits | `gpt-5.6-luna` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| Anthropic | `ANTHROPIC_API_KEY` | No, prepaid credits; new Console accounts get a small one-time test credit, and a claude.ai subscription does not include API access | `claude-haiku-4-5` | [platform.claude.com/settings/keys](https://platform.claude.com/settings/keys) |
 
-The chat ("Ask the deal", ⌘/ inside a deal) switches to the live model as soon as an Anthropic key is present in the API's environment, even if extraction stays on the mock provider. It runs a tool-use loop (`apps/api/src/bearcase/chat/tools.py`), streams Server-Sent Events, and every `[E:…]`/`[M:…]` citation is checked against the deal's evidence and metrics before the reply is stored.
+Prices and rate limits change; check the provider's pricing page before relying on a free tier. Free tiers may log or train on what you send (Gemini's free tier and OpenRouter's free endpoints say so), and the chat sends claim text and evidence snippets from the deal to the provider, so keep real deal documents off them.
+
+Three steps:
+
+1. `cp .env.example .env` if the file is missing (`make setup` creates it).
+2. Add one line, for example `GEMINI_API_KEY=...` (for Ollama, `OLLAMA_HOST=http://127.0.0.1:11434`).
+3. Restart the API with `make api` (or `make dev`).
+
+The chat header shows the provider and model that answered. `GET /api/deals/{id}/chat/config` returns the same, plus a plain-language note when a configured provider could not start; in that case the chat falls back to the composer instead of failing.
+
+- Extraction and reports still use `BEARCASE_AI_PROVIDER` (`mock` or `anthropic`) with `BEARCASE_AI_MODEL`. Chat and extraction are independent: the chat can run on Gemini while extraction stays on the mock, or the other way round. To use Claude for extraction:
+
+  ```bash
+  BEARCASE_AI_PROVIDER=anthropic BEARCASE_AI_MODEL=claude-opus-5 ANTHROPIC_API_KEY=sk-ant-... make api
+  ```
+
+- Every provider goes through the same eight read-only tools (`apps/api/src/bearcase/chat/tools.py`) and the same code-side citation validation: each `[E:…]`/`[M:…]` marker is checked against the deal's evidence and metrics before the reply is stored.
+- A model without tool calling falls back automatically to a grounded single-shot mode: code pre-fetches the persisted rows the tools would have returned, the model drafts from those, and the same citation validation applies.
+- To pin a provider, set `BEARCASE_CHAT_PROVIDER` to one of `mock`, `anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `ollama`, `custom`; `BEARCASE_CHAT_MODEL` overrides the default model. For any other OpenAI-compatible server use `custom` with `BEARCASE_CHAT_BASE_URL` and `BEARCASE_CHAT_API_KEY` (https, except for loopback or private-network hosts); `custom` never borrows another provider's key. Setting `BEARCASE_CHAT_BASE_URL` next to a named provider's key routes that provider through your own gateway instead of its public endpoint, under the same https rule.
+- Keys are read from the environment or `.env` only; no endpoint returns them and they are not logged. `GOOGLE_API_KEY` is accepted as an alias for `GEMINI_API_KEY`, and `ANTHROPIC_AUTH_TOKEN` (read by the Anthropic SDK itself) counts as an Anthropic credential in auto mode.
+
+Extraction output is validated against versioned Pydantic schemas before persistence; prompt, schema, model, and run id are stored with every extraction. Numeric verification stays in code in every mode.
 
 ### Docker Compose (PostgreSQL + MinIO + worker)
 

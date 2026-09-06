@@ -225,8 +225,10 @@ def test_ask_the_deal_is_grounded(client, demo):
 
 
 def test_chat_streams_grounded_reply_in_mock_mode(client, demo):
+    from bearcase.chat.providers import REGISTRY
+
     r = client.get(f"/api/deals/{demo['id']}/chat/config")
-    assert r.status_code == 200 and r.json()["provider"] in ("mock", "anthropic")
+    assert r.status_code == 200 and r.json()["provider"] in {"mock", *REGISTRY}
     with client.stream("POST", f"/api/deals/{demo['id']}/chat", json={"message": "Why was adjusted EBITDA reduced?"}) as resp:
         assert resp.status_code == 200 and resp.headers["content-type"].startswith("text/event-stream")
         body = "".join(resp.iter_text())

@@ -15,9 +15,10 @@ import { fmtDate, fmtValue } from "@/lib/format";
 interface EvidenceCite { id: string; document_id: string; document_name: string; doc_type: string; locator: Record<string, unknown>; kind: string; text: string }
 interface MetricCite { id: string; key: string; label: string; value: string | null; unit: string; formula: string | null }
 interface Citations { evidence: EvidenceCite[]; metrics: MetricCite[]; unresolved?: number; material_sentences?: number; cited_sentences?: number }
-interface Msg { id: string; role: "user" | "assistant"; content: string; citations: Citations; tool_calls: Array<{ name: string; label?: string }>; grounded: boolean; provider: string; model: string; error: string | null; created_at: string; streaming?: boolean; tools?: string[] }
+export interface Msg { id: string; role: "user" | "assistant"; content: string; citations: Citations; tool_calls: Array<{ name: string; label?: string }>; grounded: boolean; provider: string; model: string; label?: string; error: string | null; created_at: string; streaming?: boolean; tools?: string[] }
 interface Thread { id: string; title: string; created_at: string; updated_at: string; message_count: number }
-interface ChatConfig { provider: string; model: string; suggested: string[]; note: string }
+export interface ChatOption { provider: string; label: string; env: string; free_tier: boolean; free_tier_note: string; default_model: string; key_url: string }
+interface ChatConfig { provider: string; label: string; model: string; live: boolean; note: string; suggested: string[]; options: ChatOption[] }
 
 const CITE = /\[(E|M):([0-9a-f-]{36})\]/g;
 
@@ -95,7 +96,7 @@ function ChatPanel({ dealId, onClose }: { dealId: string; onClose: () => void })
           const dataLine = frame.split("\n").find((l) => l.startsWith("data: "));
           if (!ev || !dataLine) continue;
           const data = JSON.parse(dataLine.slice(6));
-          if (ev === "meta") { if (!threadId) setThreadId(data.thread_id); update((d) => ({ ...d, provider: data.provider, model: data.model })); }
+          if (ev === "meta") { if (!threadId) setThreadId(data.thread_id); update((d) => ({ ...d, provider: data.provider, model: data.model, label: data.label })); }
           else if (ev === "tool" && data.status === "start") update((d) => ({ ...d, tools: [...(d.tools ?? []), data.label ?? data.name] }));
           else if (ev === "text") update((d) => ({ ...d, content: d.content + data.delta }));
           else if (ev === "citations") update((d) => ({ ...d, citations: data }));
@@ -115,13 +116,13 @@ function ChatPanel({ dealId, onClose }: { dealId: string; onClose: () => void })
 
   const newThread = () => { abortRef.current?.abort(); setThreadId(null); setMessages([]); };
   const deleteThread = async (id: string) => { await fetch(`/api/deals/${dealId}/chat/threads/${id}`, { method: "DELETE", credentials: "include" }); if (id === threadId) newThread(); qc.invalidateQueries({ queryKey: ["chat-threads", dealId] }); };
-  const live = config.data?.provider === "anthropic";
+  const live = config.data?.live === true;
   return (
     <>
       <div className="flex h-14 items-center gap-3 border-b border-hairline px-4">
         <div className="min-w-0 flex-1">
           <Dialog.Title className="text-sm font-semibold">Ask the deal</Dialog.Title>
-          <Dialog.Description id="chat-desc" className="truncate text-[11px] text-fg-muted">{config.data ? (live ? `Live model: ${config.data.model}` : "Rule-based mode (no API key configured)") : "Loading"}</Dialog.Description>
+          <Dialog.Description id="chat-desc" className="truncate text-[11px] text-fg-muted">{config.data ? (live ? `Live: ${config.data.label} · ${config.data.model}` : "Rule-based mode (no model connected)") : "Loading"}</Dialog.Description>
         </div>
         <Kbd>⌘/</Kbd>
         <Dialog.Close className="rounded-[var(--radius-1)] p-1.5 text-fg-muted hover:bg-bg-muted" aria-label="Close" onClick={onClose}><X size={16} /></Dialog.Close>
@@ -142,12 +143,13 @@ function ChatPanel({ dealId, onClose }: { dealId: string; onClose: () => void })
         <div className="flex min-w-0 flex-1 flex-col">
           <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
             {messages.length === 0 && (
-              <div className="flex h-full flex-col justify-end gap-4">
+              <div className="flex min-h-full flex-col justify-end gap-4">
                 <div className="text-sm text-fg-muted">
                   <p className="text-base font-semibold text-fg">Ask anything about this deal.</p>
                   <p className="mt-2 max-w-[46ch]">{config.data?.note ?? ""}</p>
                   <p className="mt-2 max-w-[46ch]">Answers are built from the claim ledger, verified metrics, add-back decisions, scenario runs, and the documents themselves. Every number carries a citation you can open.</p>
                 </div>
+                {config.data && !live && <ConnectModel options={config.data.options} />}
                 {config.data && (
                   <div className="flex flex-wrap gap-1.5">
                     {config.data.suggested.map((s) => <button key={s} type="button" className="rounded-[var(--radius-2)] border border-hairline px-2.5 py-1.5 text-left text-xs hover:bg-bg-muted" onClick={() => send(s)}>{s}</button>)}
@@ -173,7 +175,31 @@ function ChatPanel({ dealId, onClose }: { dealId: string; onClose: () => void })
   );
 }
 
-function MessageView({ m, onOpen }: { m: Msg; onOpen: (t: ViewerTarget) => void }) {
+/** Empty-state block when no model is connected: one instruction and the provider options in API order (free tiers first). */
+export function ConnectModel({ options }: { options: ChatOption[] }) {
+  if (!options?.length) return null;
+  return (
+    <div className="text-sm">
+      <p className="font-medium text-fg">Connect a model</p>
+      <p className="mt-1 max-w-[46ch] text-fg-muted">Add one key to .env in the repo root and restart the API. Free options first.</p>
+      <ul className="mt-2 divide-y divide-hairline border-y border-hairline">
+        {options.map((o) => (
+          <li key={o.provider} className="py-1.5 text-xs">
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+              <a href={o.key_url} target="_blank" rel="noreferrer" className="font-medium text-accent underline-offset-2 hover:underline">{o.label}</a>
+              <code className="font-mono text-[11px] text-fg">{o.env}</code>
+              <span className="break-all text-fg-muted">{o.default_model}</span>
+              {o.free_tier && <span className="text-fg-muted">free tier</span>}
+            </div>
+            {o.free_tier_note && <p className="mt-0.5 max-w-[60ch] text-[11px] leading-snug text-fg-muted">{o.free_tier_note}</p>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function MessageView({ m, onOpen }: { m: Msg; onOpen: (t: ViewerTarget) => void }) {
   if (m.role === "user") return <li className="self-end max-w-[85%] rounded-[var(--radius-3)] bg-bg-muted px-3.5 py-2.5 text-sm">{m.content}</li>;
   const tools = m.tools?.length ? m.tools : m.tool_calls.map((t) => t.label ?? t.name);
   return (
@@ -184,7 +210,7 @@ function MessageView({ m, onOpen }: { m: Msg; onOpen: (t: ViewerTarget) => void 
       {!m.streaming && m.content && (
         <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-fg-muted">
           <span className="inline-flex items-center gap-1"><StatusGlyph status={m.grounded ? "supported" : "review_required"} size={11} />{m.grounded ? "Every factual sentence cited" : `${m.citations.cited_sentences ?? 0} of ${m.citations.material_sentences ?? 0} factual sentences cited`}</span>
-          {m.provider && <span>{m.provider}/{m.model}</span>}
+          {m.provider && <span>{m.label ? `${m.label} · ${m.model}` : `${m.provider}/${m.model}`}</span>}
           <span>{fmtDate(m.created_at)}</span>
         </p>
       )}

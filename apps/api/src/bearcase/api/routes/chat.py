@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from bearcase.api.deps import DbDep, DealDep, UserDep
-from bearcase.chat.service import chat_provider_name, stream_reply
+from bearcase.chat.providers import MOCK_BACKEND, REGISTRY, public_options, resolve_chat_backend
+from bearcase.chat.service import stream_reply
 from bearcase.config import get_settings
 from bearcase.models import ChatThread
 
@@ -48,6 +49,7 @@ def _message_out(m) -> dict:  # type: ignore[no-untyped-def]
         "grounded": m.grounded,
         "provider": m.provider,
         "model": m.model,
+        "label": REGISTRY[m.provider].label if m.provider in REGISTRY else MOCK_BACKEND.label,
         "error": m.error,
         "created_at": m.created_at.isoformat(),
     }
@@ -55,16 +57,37 @@ def _message_out(m) -> dict:  # type: ignore[no-untyped-def]
 
 @router.get("/deals/{deal_id}/chat/config")
 def config(deal: DealDep) -> dict:
+    """Which backend answers chat and why, plus the providers a user could connect. Never includes keys."""
     _ = deal
     s = get_settings()
-    provider = chat_provider_name()
+    resolved = resolve_chat_backend(s)
+    backend = resolved if resolved.ready else MOCK_BACKEND
+    if not resolved.ready:
+        note = (
+            f"{resolved.label} was requested but is not ready: {resolved.reason}. "
+            "Answers come from the rule-based composer until this is fixed."
+        )
+    elif backend.kind == "mock":
+        note = (
+            "The rule-based composer is selected (BEARCASE_CHAT_PROVIDER=mock). "
+            "Set it to auto and add one model key to .env to connect a model."
+            if s.chat_provider == "mock"
+            else "No model key is configured, so answers come from the deterministic rule-based composer. "
+            "Add one key to .env and restart the API to connect a model."
+        )
+    else:
+        note = (
+            f"Live model: answers are drafted by {backend.label} ({backend.model}) from tool results over persisted rows, "
+            "and every citation is validated in code."
+        )
     return {
-        "provider": provider,
-        "model": s.ai_model if provider == "anthropic" else "rules-v1",
+        "provider": backend.name,
+        "label": backend.label,
+        "model": backend.model,
+        "live": backend.kind != "mock",
+        "note": note,
         "suggested": SUGGESTED,
-        "note": "Live model: answers are drafted by Claude from tool results over persisted rows and every citation is validated in code."
-        if provider == "anthropic"
-        else "No Anthropic key is configured, so answers come from the deterministic rule-based composer. Set ANTHROPIC_API_KEY (or BEARCASE_ANTHROPIC_API_KEY) and restart the API for a live model.",
+        "options": public_options(),
     }
 
 

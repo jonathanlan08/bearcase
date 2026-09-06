@@ -1,5 +1,7 @@
-"""Chat service: streams Server-Sent Events. Anthropic mode runs a tool-use loop; mock mode streams
-the rule-based composer so the product works without a key. Citations are validated in code."""
+"""Chat service: streams Server-Sent Events. A live backend (Anthropic, or any OpenAI-compatible provider
+via chat/openai_compat.py) runs a tool-use loop; mock mode streams the rule-based composer so the product
+works without a key. Which backend answers is decided in chat/providers.py. Citations are validated in code
+for every backend."""
 
 from __future__ import annotations
 
@@ -14,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from bearcase.ai.prompts import PROMPT_VERSION
 from bearcase.audit import record
+from bearcase.chat.providers import MOCK_BACKEND, REGISTRY, ChatBackend, resolve_chat_backend
 from bearcase.chat.tools import TOOL_LABELS, TOOLS, run_tool
 from bearcase.config import get_settings
 from bearcase.models import ChatMessage, ChatThread, Deal, Evidence, FinancialMetric
@@ -41,17 +44,44 @@ def sse(event: str, data: Any) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
 
 
+class ModelStoppedError(RuntimeError):
+    """The provider returned without a usable answer (refusal, content filter, length cap, malformed tool
+    call, or the tool-round cap). Raised inside a loop so the message is streamed, stored, and audited."""
+
+
+def describe_error(exc: BaseException, backend: ChatBackend) -> str:
+    """Short, actionable text for the user and the stored row. Provider failures are mapped to the fix
+    (which env var to check, rate limits, unknown model, unreachable host); the key itself is never included."""
+    if isinstance(exc, ModelStoppedError):
+        return str(exc)[:500]
+    raw = f"{type(exc).__name__}: {exc}"
+    if backend.kind == "mock":
+        return raw[:500]
+    status = getattr(exc, "status_code", None)
+    low = raw.lower()
+    spec = REGISTRY.get(backend.name)
+    env = spec.env if spec else "the API key"
+    if status in (401, 403) or "api key" in low or "authentication" in low or "unauthorized" in low:
+        msg = f"{backend.label} rejected the API key. Check {env} in .env and restart the API."
+    elif status == 429 or "rate limit" in low or "quota" in low:
+        msg = f"{backend.label} rate limit or quota reached. Wait a minute and try again; free tiers are limited."
+    elif status == 404 and "model" in low:
+        msg = f"{backend.label} does not know the model {backend.model!r}. Set BEARCASE_CHAT_MODEL to a valid id."
+    elif "connection" in low or "timeout" in low:
+        where = f" at {backend.base_url}" if backend.base_url else ""
+        msg = f"Could not reach {backend.label}{where}. Check the network or the base URL."
+    else:
+        msg = raw[:500]
+    key = backend.api_key or ""
+    if len(key) >= 8 and key in msg:
+        msg = msg.replace(key, "[redacted]")
+    return msg
+
+
 def chat_provider_name() -> str:
-    s = get_settings()
-    if s.ai_provider == "anthropic" or s.anthropic_api_key or _env_key():
-        return "anthropic"
-    return "mock"
-
-
-def _env_key() -> bool:
-    import os
-
-    return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+    """Name of the backend that will actually answer (the resolved one when ready, otherwise "mock")."""
+    backend = resolve_chat_backend()
+    return backend.name if backend.ready else MOCK_BACKEND.name
 
 
 def resolve_citations(db: Session, deal: Deal, text: str) -> tuple[str, dict[str, Any], bool]:
@@ -136,9 +166,10 @@ def _history(thread: ChatThread, limit: int = 20) -> list[dict[str, Any]]:
 
 
 def stream_reply(db: Session, deal: Deal, thread: ChatThread, user_id: uuid.UUID, user_text: str) -> Iterator[str]:
-    provider = chat_provider_name()
-    s = get_settings()
-    model = s.ai_model if provider == "anthropic" else "rules-v1"
+    backend = resolve_chat_backend()
+    if not backend.ready:
+        backend = MOCK_BACKEND
+    provider, model = backend.name, backend.model
     user_msg = ChatMessage(
         thread_id=thread.id, role="user", content=user_text, provider=provider, model=model, prompt_version=PROMPT_VERSION
     )
@@ -150,19 +181,32 @@ def stream_reply(db: Session, deal: Deal, thread: ChatThread, user_id: uuid.UUID
     if not thread.title:
         thread.title = user_text[:80]
     db.commit()
-    yield sse("meta", {"thread_id": str(thread.id), "message_id": str(assistant.id), "provider": provider, "model": model})
+    yield sse(
+        "meta",
+        {
+            "thread_id": str(thread.id),
+            "message_id": str(assistant.id),
+            "provider": provider,
+            "model": model,
+            "label": backend.label,
+        },
+    )
     history = _history(thread)  # includes the user message just added
     text_parts: list[str] = []
     tool_calls: list[dict[str, Any]] = []
     usage: dict[str, Any] = {}
     error: str | None = None
     try:
-        if provider == "anthropic":
-            yield from _anthropic_loop(db, deal, history, text_parts, tool_calls, usage, model)
+        if backend.kind == "anthropic":
+            yield from _anthropic_loop(db, deal, backend, history, text_parts, tool_calls, usage)
+        elif backend.kind == "openai_compat":
+            from bearcase.chat.openai_compat import openai_compat_loop  # imports this module; keep it lazy
+
+            yield from openai_compat_loop(db, deal, backend, history, text_parts, tool_calls, usage)
         else:
             yield from _mock_stream(db, deal, user_text, text_parts, tool_calls)
     except Exception as exc:
-        error = f"{type(exc).__name__}: {exc}"[:500]
+        error = describe_error(exc, backend)
         yield sse("error", {"message": error})
     raw = "".join(text_parts)
     cleaned, citations, grounded = resolve_citations(db, deal, raw)
@@ -195,21 +239,22 @@ def stream_reply(db: Session, deal: Deal, thread: ChatThread, user_id: uuid.UUID
 def _anthropic_loop(
     db: Session,
     deal: Deal,
+    backend: ChatBackend,
     history: list[dict[str, Any]],
     text_parts: list[str],
     tool_calls: list[dict[str, Any]],
     usage: dict[str, Any],
-    model: str,
 ) -> Iterator[str]:
     import anthropic
 
     s = get_settings()
-    client = anthropic.Anthropic(api_key=s.anthropic_api_key, timeout=s.ai_timeout_seconds, max_retries=s.ai_max_retries)
+    # api_key None lets the SDK read ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN itself.
+    client = anthropic.Anthropic(api_key=backend.api_key, timeout=s.ai_timeout_seconds, max_retries=s.ai_max_retries)
     messages: list[dict[str, Any]] = list(history)
     system = SYSTEM.format(company=deal.company_name)
     for _round in range(MAX_TOOL_ROUNDS + 1):
         with client.messages.stream(
-            model=model, max_tokens=4096, system=system, tools=cast(Any, TOOLS), messages=cast(Any, messages)
+            model=backend.model, max_tokens=4096, system=system, tools=cast(Any, TOOLS), messages=cast(Any, messages)
         ) as stream:
             for text in stream.text_stream:
                 text_parts.append(text)
@@ -218,8 +263,7 @@ def _anthropic_loop(
         usage["input_tokens"] = usage.get("input_tokens", 0) + final.usage.input_tokens
         usage["output_tokens"] = usage.get("output_tokens", 0) + final.usage.output_tokens
         if final.stop_reason == "refusal":
-            yield sse("error", {"message": "The model declined this request."})
-            return
+            raise ModelStoppedError("The model declined this request.")
         if final.stop_reason != "tool_use":
             return
         uses = [b for b in final.content if b.type == "tool_use"]
@@ -238,7 +282,7 @@ def _anthropic_loop(
         if text_parts and not text_parts[-1].endswith("\n"):
             text_parts.append("\n\n")
             yield sse("text", {"delta": "\n\n"})
-    yield sse("error", {"message": "Stopped after the maximum number of tool rounds."})
+    raise ModelStoppedError("Stopped after the maximum number of tool rounds.")
 
 
 def _mock_stream(
