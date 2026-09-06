@@ -12,7 +12,7 @@
 | Fonts | 3 families, subset latin, `display: swap`, self-hosted via `next/font` |
 | Images | none required; OG image only |
 | Frame time | ≤ 16ms tier 3/2, ≤ 22ms tier 1; auto-degrade otherwise |
-| GPU | DPR capped per tier; no post-processing; ≤ 12 draw calls in the scene |
+| GPU | DPR capped per tier; bloom and vignette only at tiers 2 and 3; transmission material and shadows only at tier 3; ≤ 16 draw calls in the scene |
 
 ## Application
 

@@ -4,7 +4,8 @@
    standard React Three Fiber pattern and avoids re-rendering React on every frame. */
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Html } from "@react-three/drei";
+import { ContactShadows, Environment, Html, Lightformer, MeshTransmissionMaterial } from "@react-three/drei";
+import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { DOC_LABELS, NODES, ramp, type Status } from "@/components/scene/storyboard";
@@ -59,6 +60,25 @@ function getPaperTexture(): THREE.CanvasTexture | null {
   return paperTexture;
 }
 
+/* ---------- soft round particle sprite (procedural) ---------- */
+let spriteTexture: THREE.CanvasTexture | null = null;
+function getSprite(): THREE.CanvasTexture | null {
+  if (spriteTexture) return spriteTexture;
+  if (typeof document === "undefined") return null;
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const g = c.getContext("2d");
+  if (!g) return null;
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.35, "rgba(255,255,255,0.6)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  spriteTexture = new THREE.CanvasTexture(c);
+  return spriteTexture;
+}
+
 /* ---------- shared, mutable scene state (one object, updated per frame) ---------- */
 interface SceneState { p: number; pointer: THREE.Vector2; drag: THREE.Vector2; selected: number | null; hover: number | null; degrade: () => void }
 
@@ -88,19 +108,19 @@ function nodePose(i: number, p: number, docPos: THREE.Vector3): THREE.Vector3 {
   const pos = start.clone().lerp(onCore, flow);
   if (status === "supported") {
     const gi = i % 6;
-    const cell = new THREE.Vector3(1.9 + (gi % 3) * 0.55, 0.8 - Math.floor(gi / 3) * 0.5, 0.3);
+    const cell = new THREE.Vector3(1.25 + (gi % 3) * 0.5, 0.85 - Math.floor(gi / 3) * 0.48, 0.32);
     pos.lerp(cell, ramp(p, 0.68, 0.8));
-    const report = new THREE.Vector3(2.55, -0.85 + gi * 0.12, 0.62);
+    const report = new THREE.Vector3(2.15, -0.7 + gi * 0.12, 0.72);
     pos.lerp(report, ramp(p, 0.9, 1));
   } else if (status === "contradicted") {
     const jitter = Math.sin(p * 80 + i) * 0.03 * ramp(p, 0.5, 0.6) * (1 - ramp(p, 0.68, 0.72));
     pos.add(new THREE.Vector3(jitter, -jitter, 0));
-    const risk = new THREE.Vector3(2.45, -0.3 + (i % 4) * 0.14, 0.62);
+    const risk = new THREE.Vector3(2.05, -0.15 + (i % 4) * 0.14, 0.72);
     pos.lerp(risk, ramp(p, 0.9, 1));
   } else if (status === "unsupported") {
     pos.y -= ramp(p, 0.6, 0.68) * 2.2;
   } else {
-    const rev = new THREE.Vector3(2.5, -0.6, 0.62);
+    const rev = new THREE.Vector3(2.1, -0.45, 0.72);
     pos.lerp(rev, ramp(p, 0.9, 1));
   }
   return pos;
@@ -140,9 +160,9 @@ function Documents({ state, count, edges }: { state: SceneState; count: number; 
   });
   return (
     <group>
-      <instancedMesh ref={mesh} args={[undefined, undefined, count]} frustumCulled={false}>
-        <planeGeometry args={[1, 1.3]} />
-        <meshStandardMaterial map={getPaperTexture() ?? undefined} color={C.paper} roughness={0.9} metalness={0} transparent opacity={0.94} side={THREE.DoubleSide} emissive={C.core} emissiveIntensity={0.15} />
+      <instancedMesh ref={mesh} args={[undefined, undefined, count]} frustumCulled={false} castShadow>
+        <boxGeometry args={[1, 1.3, 0.012]} />
+        <meshPhysicalMaterial map={getPaperTexture() ?? undefined} color={C.paper} roughness={0.82} metalness={0} sheen={0.4} sheenRoughness={0.9} clearcoat={0.05} />
       </instancedMesh>
       {edges && <lineSegments ref={edgeRef} geometry={edgeGeo}><lineBasicMaterial color={C.inkEdge} transparent opacity={0.6} /></lineSegments>}
     </group>
@@ -196,10 +216,12 @@ const fresnelMaterial = () =>
     side: THREE.FrontSide,
   });
 
-function Core({ state, simplified }: { state: SceneState; simplified: boolean }) {
+function Core({ state, tier }: { state: SceneState; tier: Tier }) {
   const mat = useMemo(() => fresnelMaterial(), []);
   const group = useRef<THREE.Group>(null);
   const wire = useRef<THREE.Mesh>(null);
+  const inner = useRef<THREE.Mesh>(null);
+  const glass = useRef<THREE.Mesh>(null);
   useFrame((_, dt) => {
     const p = state.p;
     const t = performance.now() / 1000;
@@ -211,13 +233,29 @@ function Core({ state, simplified }: { state: SceneState; simplified: boolean })
       const s = 1 - ramp(p, 0.68, 0.8) * 0.4;
       group.current.scale.setScalar(s * (1 + Math.sin(t / 6) * 0.02));
       group.current.position.x = -ramp(p, 0.68, 0.8) * 1.6;
+      group.current.visible = p < 0.985;
     }
     if (wire.current) wire.current.rotation.y += dt * 0.08;
+    if (inner.current) { inner.current.rotation.x -= dt * 0.05; inner.current.rotation.z += dt * 0.03; const m = inner.current.material as THREE.MeshStandardMaterial; m.emissiveIntensity = 0.6 + pulse * 2 + Math.sin(t * 1.3) * 0.15; }
+    if (glass.current) { const m = glass.current.material as THREE.MeshPhysicalMaterial; m.opacity = 1 - ramp(p, 0.9, 1) * 0.9; }
   });
   return (
     <group ref={group}>
-      <mesh material={mat}><icosahedronGeometry args={[1.15, 3]} /></mesh>
-      {!simplified && (<mesh ref={wire}><icosahedronGeometry args={[0.95, 1]} /><meshBasicMaterial color={C.inkEdge} wireframe transparent opacity={0.5} /></mesh>)}
+      {tier === 3 && (
+        <mesh ref={glass}>
+          <icosahedronGeometry args={[1.15, 4]} />
+          <MeshTransmissionMaterial samples={6} resolution={512} thickness={0.6} roughness={0.12} ior={1.35} chromaticAberration={0.05} anisotropicBlur={0.2} distortion={0.15} distortionScale={0.4} temporalDistortion={0.1} color={C.paper} attenuationColor={C.signal} attenuationDistance={3} transparent />
+        </mesh>
+      )}
+      {tier === 2 && (
+        <mesh ref={glass}>
+          <icosahedronGeometry args={[1.15, 4]} />
+          <meshPhysicalMaterial transmission={0.9} thickness={0.5} roughness={0.15} ior={1.3} color={C.paper} attenuationColor={C.signal} attenuationDistance={2.5} transparent opacity={1} envMapIntensity={1.2} />
+        </mesh>
+      )}
+      <mesh material={mat} scale={tier === 1 ? 1 : 1.02}><icosahedronGeometry args={[1.15, 3]} /></mesh>
+      <mesh ref={inner}><icosahedronGeometry args={[0.42, 2]} /><meshStandardMaterial color={C.signal} emissive={C.signal} emissiveIntensity={0.8} roughness={0.4} /></mesh>
+      {tier > 1 && (<mesh ref={wire}><icosahedronGeometry args={[0.95, 1]} /><meshBasicMaterial color={C.inkEdge} wireframe transparent opacity={0.45} /></mesh>)}
     </group>
   );
 }
@@ -252,8 +290,8 @@ function ClaimNodes({ state, docCount, onSelect }: { state: SceneState; docCount
   });
   return (
     <instancedMesh ref={mesh} args={[undefined, undefined, NODES.length]} frustumCulled={false} onClick={(e) => { e.stopPropagation(); onSelect(e.instanceId ?? null); }} onPointerOver={(e) => { state.hover = e.instanceId ?? null; document.body.style.cursor = "pointer"; }} onPointerOut={() => { state.hover = null; document.body.style.cursor = ""; }}>
-      <sphereGeometry args={[1, 16, 16]} />
-      <meshStandardMaterial roughness={0.6} metalness={0.1} />
+      <sphereGeometry args={[1, 20, 20]} />
+      <meshPhysicalMaterial roughness={0.35} metalness={0.05} clearcoat={0.6} clearcoatRoughness={0.3} />
     </instancedMesh>
   );
 }
@@ -320,9 +358,9 @@ function ModelGrid({ state }: { state: SceneState }) {
       const delay = (r * 6 + c) / 36;
       const k = Math.max(0, Math.min(1, (assemble - delay * 0.5) / 0.5));
       const sink = r === 4 ? down * 0.28 : 0;
-      tmp.position.set(1.6 + c * 0.42 * (1 - compress * 0.6) + compress * 0.9, 1.0 - r * 0.36 + (1 - k) * 0.6 - sink - compress * 0.5, 0.3 - (1 - k) * 1.5);
+      tmp.position.set(1.05 + c * 0.38 * (1 - compress * 0.5) + compress * 1.3, 1.05 - r * 0.34 + (1 - k) * 0.6 - sink + compress * 0.3, 0.3 - (1 - k) * 1.5 - compress * 2.2);
       tmp.rotation.set(0, 0, 0);
-      tmp.scale.set(0.36 * k, 0.28 * k, 0.05 * k);
+      tmp.scale.set(0.32 * k, 0.26 * k, 0.05 * k);
       tmp.updateMatrix();
       mesh.current.setMatrixAt(i, tmp.matrix);
       const target = r === 4 && down > 0 ? C.amber.clone().lerp(C.red, ramp(p, 0.86, 0.9)) : C.paper.clone().multiplyScalar(0.85 - r * 0.06);
@@ -332,20 +370,20 @@ function ModelGrid({ state }: { state: SceneState }) {
     if (mesh.current.instanceColor) mesh.current.instanceColor.needsUpdate = true;
     if (rule.current) {
       rule.current.visible = down > 0.01 && compress < 0.99;
-      rule.current.position.set(2.65 + compress * 0.9, 1.0 - 4 * 0.36 + 0.14 - down * 0.28 - compress * 0.5, 0.36);
+      rule.current.position.set(2.0 + compress * 1.3, 1.05 - 4 * 0.34 + 0.13 - down * 0.28 + compress * 0.3, 0.36 - compress * 2.2);
       (rule.current.material as THREE.MeshBasicMaterial).color.copy(C.amber).lerp(C.red, ramp(p, 0.86, 0.9));
       (rule.current.material as THREE.MeshBasicMaterial).opacity = 0.9 * down * (1 - compress);
     }
     if (marker.current) {
       marker.current.visible = down > 0.5 && compress < 0.99;
-      marker.current.position.set(1.25, 1.0 - 4 * 0.36 - down * 0.28, 0.4);
+      marker.current.position.set(0.75, 1.05 - 4 * 0.34 - down * 0.28, 0.4);
       marker.current.scale.setScalar(ramp(p, 0.85, 0.9) * 0.16);
     }
   });
   return (
     <group>
-      <instancedMesh ref={mesh} args={[undefined, undefined, 36]} frustumCulled={false}><boxGeometry args={[1, 1, 1]} /><meshStandardMaterial roughness={0.7} /></instancedMesh>
-      <mesh ref={rule}><planeGeometry args={[2.6, 0.02]} /><meshBasicMaterial color={C.amber} transparent opacity={0} /></mesh>
+      <instancedMesh ref={mesh} args={[undefined, undefined, 36]} frustumCulled={false} castShadow><boxGeometry args={[1, 1, 1]} /><meshPhysicalMaterial roughness={0.55} clearcoat={0.2} /></instancedMesh>
+      <mesh ref={rule}><planeGeometry args={[2.3, 0.02]} /><meshBasicMaterial color={C.amber} transparent opacity={0} /></mesh>
       <mesh ref={marker} rotation={[0, 0, 0]}><coneGeometry args={[1, 1.6, 3]} /><meshBasicMaterial color={C.red} /></mesh>
     </group>
   );
@@ -359,7 +397,7 @@ function ReportStack({ state }: { state: SceneState }) {
     const k = ramp(state.p, 0.9, 1);
     for (let i = 0; i < 4; i++) {
       const d = Math.max(0, Math.min(1, (k - i * 0.15) / 0.55));
-      tmp.position.set(2.5 + i * 0.03, -0.9 + i * 0.05 + (1 - d) * 0.5, 0.5 - i * 0.02);
+      tmp.position.set(2.1 + i * 0.03, -0.75 + i * 0.05 + (1 - d) * 0.5, 0.6 - i * 0.02);
       tmp.rotation.set(-0.08, -0.25, 0);
       tmp.scale.setScalar(d);
       tmp.updateMatrix();
@@ -368,7 +406,7 @@ function ReportStack({ state }: { state: SceneState }) {
     mesh.current.instanceMatrix.needsUpdate = true;
   });
   return (
-    <instancedMesh ref={mesh} args={[undefined, undefined, 4]} frustumCulled={false}><planeGeometry args={[1.1, 1.4]} /><meshStandardMaterial map={getPaperTexture() ?? undefined} color={C.paper} roughness={0.9} transparent opacity={0.95} side={THREE.DoubleSide} /></instancedMesh>
+    <instancedMesh ref={mesh} args={[undefined, undefined, 4]} frustumCulled={false} castShadow><boxGeometry args={[1.1, 1.4, 0.012]} /><meshPhysicalMaterial map={getPaperTexture() ?? undefined} color={C.paper} roughness={0.82} sheen={0.4} sheenRoughness={0.9} /></instancedMesh>
   );
 }
 
@@ -409,7 +447,7 @@ function Particles({ state, count }: { state: SceneState; count: number }) {
     }
     attr.needsUpdate = true;
   });
-  return (<points ref={ref} geometry={geo} frustumCulled={false}><pointsMaterial color={C.paper} size={0.02} sizeAttenuation transparent opacity={0.5} depthWrite={false} /></points>);
+  return (<points ref={ref} geometry={geo} frustumCulled={false}><pointsMaterial color={C.paper} size={0.045} sizeAttenuation transparent opacity={0.55} depthWrite={false} map={getSprite() ?? undefined} alphaMap={getSprite() ?? undefined} blending={THREE.AdditiveBlending} /></points>);
 }
 
 /* ---------- Rig: parallax, drag, recenter, quality watchdog ---------- */
@@ -445,13 +483,24 @@ function Scene({ state, tier, onSelect, selected }: { state: SceneState; tier: T
   return (
     <>
       <color attach="background" args={["#07080A"]} />
-      <ambientLight intensity={0.35} color={C.paper} />
-      <directionalLight position={[4, 6, 5]} intensity={1.1} />
-      <pointLight position={[-5, 2, -3]} intensity={0.6} color={C.signal} />
+      <fog attach="fog" args={["#07080A", 9, 22]} />
+      <ambientLight intensity={0.25} color={C.paper} />
+      <directionalLight position={[4, 6, 5]} intensity={1.4} castShadow={tier === 3} shadow-mapSize={[1024, 1024]} shadow-bias={-0.0005} />
+      <pointLight position={[-5, 2, -3]} intensity={1.2} color={C.signal} distance={14} decay={2} />
+      <pointLight position={[3, -2, 4]} intensity={0.5} color={C.amber} distance={10} decay={2} />
+      {tier > 1 && (
+        <Environment resolution={256} frames={1}>
+          <Lightformer intensity={1.6} form="rect" scale={[6, 3, 1]} position={[0, 5, -4]} color="#F5F2EC" />
+          <Lightformer intensity={0.8} form="circle" scale={[3, 3, 1]} position={[-6, 2, 3]} color="#7FB2FF" />
+          <Lightformer intensity={0.5} form="rect" scale={[4, 1, 1]} position={[6, -1, 2]} color="#F5F2EC" />
+        </Environment>
+      )}
+      {tier > 1 && <ContactShadows position={[0, -2.6, 0]} opacity={0.55} scale={22} blur={2.4} far={6} color="#000" frames={1} />}
+      <CameraDolly state={state} />
       <Rig state={state}>
         <Documents state={state} count={docCount} edges={q.edges} />
         {tier > 1 && <Fragments state={state} count={docCount} />}
-        <Core state={state} simplified={tier === 1} />
+        <Core state={state} tier={tier} />
         <Links state={state} docCount={docCount} />
         <ClaimNodes state={state} docCount={docCount} onSelect={onSelect} />
         <ModelGrid state={state} />
@@ -470,8 +519,28 @@ function Scene({ state, tier, onSelect, selected }: { state: SceneState; tier: T
           </NodeAnchor>
         )}
       </Rig>
+      {tier > 1 && (
+        <EffectComposer multisampling={0} enableNormalPass={false}>
+          <Bloom intensity={tier === 3 ? 0.55 : 0.4} luminanceThreshold={0.72} luminanceSmoothing={0.25} mipmapBlur />
+          <Vignette eskil={false} offset={0.2} darkness={0.55} />
+        </EffectComposer>
+      )}
     </>
   );
+}
+
+/** Slow dolly-in and a gentle lift as the story progresses; the reader feels the scene resolve. */
+function CameraDolly({ state }: { state: SceneState }) {
+  const { camera } = useThree();
+  useFrame((_, dt) => {
+    const p = state.p;
+    const targetZ = 9 - ramp(p, 0, 0.6) * 0.8 + ramp(p, 0.68, 0.9) * 0.6;
+    const targetY = 0.4 - ramp(p, 0.68, 1) * 0.35;
+    camera.position.z = THREE.MathUtils.damp(camera.position.z, targetZ, 2.5, dt);
+    camera.position.y = THREE.MathUtils.damp(camera.position.y, targetY, 2.5, dt);
+    camera.lookAt(0.4 * ramp(p, 0.68, 1), 0, 0);
+  });
+  return null;
 }
 
 export function EvidenceCoreScene({ progress, mobile, onReady, onFail }: { progress: number; mobile: boolean; onReady: () => void; onFail: () => void }) {
@@ -509,7 +578,7 @@ export function EvidenceCoreScene({ progress, mobile, onReady, onFail }: { progr
   const q = TIERS[tier];
   return (
     <div ref={wrap} className="h-full w-full" style={{ touchAction: "pan-y" }} onPointerMove={onPointerMove} onPointerDown={(e) => { if (e.pointerType === "mouse" && e.button !== 0) return; dragging.current = { x: e.clientX, y: e.clientY }; }} onPointerUp={() => { dragging.current = null; }} onPointerLeave={() => { dragging.current = null; state.pointer.set(0, 0); }}>
-      <Canvas dpr={[1, q.dpr]} frameloop={visible ? "always" : "demand"} gl={{ antialias: q.aa, powerPreference: "high-performance", alpha: false }} camera={{ fov: 32, position: [0, 0.4, 9], near: 0.1, far: 60 }} onCreated={({ gl }) => { gl.domElement.addEventListener("webglcontextlost", (ev) => { ev.preventDefault(); onFail(); }); onReady(); }} onPointerMissed={() => setSelected(null)} aria-label="The Evidence Core: deal documents become sourced claims, contradictions, a verified financial model, a downside scenario, and a report" role="img">
+      <Canvas dpr={[1, q.dpr]} frameloop={visible ? "always" : "demand"} shadows={tier === 3 ? { type: THREE.PCFShadowMap } : false} gl={{ antialias: q.aa, powerPreference: "high-performance", alpha: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }} camera={{ fov: 32, position: [0, 0.4, 9], near: 0.1, far: 60 }} onCreated={({ gl }) => { gl.domElement.addEventListener("webglcontextlost", (ev) => { ev.preventDefault(); onFail(); }); onReady(); }} onPointerMissed={() => setSelected(null)} aria-label="The Evidence Core: deal documents become sourced claims, contradictions, a verified financial model, a downside scenario, and a report" role="img">
         <ProgressDriver state={state} target={target} />
         <Scene state={state} tier={tier} onSelect={setSelected} selected={selected} />
       </Canvas>

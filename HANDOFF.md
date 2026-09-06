@@ -13,6 +13,7 @@ Last updated: 2026-09-05. Single-session build with Claude Fable 5.1 (no subagen
 | 4 Claim Audit and Financial Verification | done — extraction, deterministic verification, add-back review, review decisions, audit events, UI |
 | 5 Scenario Lab and report | done — immutable runs, sensitivity grid, report assembly, citation validation, MD/PDF export, UI |
 | 5b Ask the deal | done — streaming chat (`chat_threads`, `chat_messages`, migration 3) with an Anthropic tool-use loop over persisted rows and a rule-based fallback; single-shot Q&A endpoint retained |
+| 6c Scene realism | done — transmission glass core with lit interior, paper with thickness and shading, procedural environment and contact shadows, soft additive particles, bloom and vignette by tier, camera dolly; both waterfall charts rebuilt as truncated-axis bridges |
 | 6b Design pass | done — removed serif display, eyebrows, section numbers, dot strips; one radius scale; landing sections use five distinct layouts; impeccable detector reports 0 findings |
 | 6 Landing page and polish | done — Ink/Paper design, Evidence Core scene with static fallback, methodology page |
 | 7 Audit and GitHub readiness | see "Verification" |

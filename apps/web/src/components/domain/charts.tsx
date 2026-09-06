@@ -13,49 +13,54 @@ export function AddbackWaterfall({ steps, sellerTotal }: { steps: WaterfallStep[
   const pid = useId();
   const [hover, setHover] = useState<number | null>(null);
   if (!steps.length) return null;
-  const W = 760, H = 300, padL = 56, padR = 16, padT = 20, padB = 64;
-  const innerW = W - padL - padR, innerH = H - padT - padB;
-  const vals = steps.map((s) => Number(s.running_total));
+  const totals = steps.map((s) => Number(s.running_total));
   const seller = toNumber(sellerTotal);
-  const max = Math.max(...vals, ...steps.map((s) => Math.abs(Number(s.amount))), seller ?? 0) * 1.08;
-  const min = 0;
-  const y = (v: number) => padT + innerH - ((v - min) / (max - min)) * innerH;
+  const lo = Math.min(...totals);
+  const hi = Math.max(...totals, ...steps.filter((s) => s.decision !== "reported" && s.decision !== "verified").map((s) => Number(s.running_total) + Math.abs(Number(s.amount))), seller ?? 0);
+  const floorRaw = lo - (hi - lo) * 0.35;
+  const floor = Math.max(0, Math.floor(floorRaw / 100_000) * 100_000);
+  const ceil = Math.ceil((hi * 1.04) / 100_000) * 100_000;
+  const W = 760, H = 320, padL = 64, padR = 16, padT = 40, padB = 68;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const y = (v: number) => padT + innerH - ((Math.max(floor, v) - floor) / (ceil - floor || 1)) * innerH;
   const slot = innerW / steps.length;
   const bw = Math.min(56, slot * 0.62);
-  const sellerY = seller !== null ? y(seller) : null;
+  const tickCount = 4;
+  const ticks = Array.from({ length: tickCount + 1 }, (_, i) => floor + ((ceil - floor) * i) / tickCount);
   return (
     <figure>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Add-back waterfall from reported EBITDA to verified adjusted EBITDA" onMouseLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={`Add-back bridge from reported EBITDA to verified adjusted EBITDA; axis starts at ${fmtMoney(floor, { compact: true })}`} onMouseLeave={() => setHover(null)}>
         <defs>
           <pattern id={`${pid}-hatch`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="var(--chart-graphite)" strokeWidth="1.5" /></pattern>
         </defs>
-        {[0, 0.25, 0.5, 0.75, 1].map((t) => { const v = min + t * (max - min); return <g key={t}><line x1={padL} x2={W - padR} y1={y(v)} y2={y(v)} stroke="var(--hairline)" strokeWidth="1" /><text x={padL - 6} y={y(v) + 4} textAnchor="end" className="fill-fg-muted" fontSize="10" fontFamily="var(--font-mono)">{fmtMoney(v, { compact: true })}</text></g>; })}
-        {sellerY !== null && <g><line x1={padL} x2={W - padR} y1={sellerY} y2={sellerY} stroke="var(--chart-graphite)" strokeWidth="1" strokeDasharray="4 3" /><text x={W - padR} y={sellerY - 4} textAnchor="end" fontSize="10" fontFamily="var(--font-mono)" className="fill-fg-muted">seller {fmtMoney(seller, { compact: true })}</text></g>}
+        {ticks.map((t) => <g key={t}><line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--hairline)" strokeWidth="1" /><text x={padL - 6} y={y(t) + 4} textAnchor="end" className="fill-fg-muted" fontSize="10" fontFamily="var(--font-mono)">{fmtMoney(t, { compact: true })}</text></g>)}
+        {seller !== null && seller > floor && <g><line x1={padL} x2={W - padR} y1={y(seller)} y2={y(seller)} stroke="var(--chart-graphite)" strokeWidth="1" strokeDasharray="4 3" /><text x={padL + 6} y={y(seller) - 5} fontSize="10" fontFamily="var(--font-mono)" className="fill-fg-muted">seller {fmtMoney(seller, { compact: true })}</text></g>}
         {steps.map((s, i) => {
           const amt = Number(s.amount);
           const isTotal = s.decision === "reported" || s.decision === "verified";
-          const prev = i === 0 ? 0 : Number(steps[i - 1].running_total);
+          const prev = i === 0 ? floor : Number(steps[i - 1].running_total);
           const top = isTotal ? Number(s.running_total) : s.included ? Math.max(prev, prev + amt) : prev + Math.abs(amt);
-          const bottom = isTotal ? 0 : s.included ? Math.min(prev, prev + amt) : prev;
+          const bottom = isTotal ? floor : s.included ? Math.min(prev, prev + amt) : prev;
           const x = padL + i * slot + (slot - bw) / 2;
           const fill = s.included ? FILL[s.decision] ?? "var(--chart-signal)" : `url(#${pid}-hatch)`;
           const active = hover === i;
           return (
             <g key={i} onMouseEnter={() => setHover(i)} onFocus={() => setHover(i)} tabIndex={0} role="listitem" aria-label={`${s.label}: ${fmtMoney(amt, { signed: !isTotal })}${s.included ? "" : `, ${s.decision.replace("_", " ")}, excluded`}; running total ${fmtMoney(s.running_total)}`}>
               <rect x={x - 6} y={padT} width={bw + 12} height={innerH} fill="transparent" />
-              <rect x={x} y={y(top)} width={bw} height={Math.max(2, y(bottom) - y(top))} fill={fill} rx={2} stroke={active ? "var(--fg)" : s.included ? "none" : "var(--chart-graphite)"} strokeWidth={active ? 1.5 : 1} strokeDasharray={s.included ? undefined : "3 2"} />
               {i > 0 && !isTotal && <line x1={x - (slot - bw) / 2} x2={x} y1={y(prev)} y2={y(prev)} stroke="var(--fg-muted)" strokeWidth="1" />}
-              <text x={x + bw / 2} y={y(top) - 6} textAnchor="middle" fontSize="11" fontFamily="var(--font-mono)" className="fill-fg">{isTotal ? fmtMoney(s.running_total, { compact: true }) : `${amt >= 0 ? "▲" : "▼"} ${fmtMoney(Math.abs(amt), { compact: true })}`}</text>
+              <rect x={x} y={y(top)} width={bw} height={Math.max(2, y(bottom) - y(top))} fill={fill} rx={2} stroke={active ? "var(--fg)" : s.included ? "none" : "var(--chart-graphite)"} strokeWidth={active ? 1.5 : 1} strokeDasharray={s.included ? undefined : "3 2"} />
+              <text x={x + bw / 2} y={y(top) - 6} textAnchor="middle" fontSize="11" fontFamily="var(--font-mono)" className="fill-fg">{isTotal ? fmtMoney(s.running_total, { compact: true }) : `${amt >= 0 ? "+" : "−"}${fmtMoney(Math.abs(amt), { compact: true })}`}</text>
               <foreignObject x={padL + i * slot} y={H - padB + 6} width={slot} height={padB - 6}><div className="px-0.5 text-center text-[10px] leading-tight text-fg-muted" style={{ fontFamily: "var(--font-sans)" }}>{s.label.replace(/\s*\(.*\)/, "")}</div></foreignObject>
             </g>
           );
         })}
-        <line x1={padL} x2={W - padR} y1={y(0)} y2={y(0)} stroke="var(--fg-muted)" strokeWidth="1" />
+        <line x1={padL} x2={W - padR} y1={y(floor)} y2={y(floor)} stroke="var(--fg-muted)" strokeWidth="1" />
       </svg>
       <figcaption className="mt-2 flex flex-wrap gap-4 text-xs text-fg-muted">
-        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-[2px] bg-chart-signal" />Accepted / verified</span>
-        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-[2px] border border-dashed border-graphite diag-hatch text-graphite" />Rejected, review, or unsupported (excluded from the total)</span>
-        {hover !== null && <span className="ml-auto num text-fg">{steps[hover].label}: {fmtMoney(steps[hover].amount, { signed: true })} · running {fmtMoney(steps[hover].running_total)}</span>}
+        <span>Axis starts at {fmtMoney(floor, { compact: true })}</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-[2px] bg-chart-signal" />Accepted or total</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded-[2px] border border-dashed border-graphite diag-hatch text-graphite" />Rejected, review, or unsupported (excluded)</span>
+        {hover !== null && <span className="ml-auto num text-fg">{steps[hover].label}: {fmtMoney(steps[hover].amount, { signed: true })}, running {fmtMoney(steps[hover].running_total)}</span>}
       </figcaption>
     </figure>
   );

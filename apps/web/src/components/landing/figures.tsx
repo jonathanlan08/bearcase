@@ -1,6 +1,7 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useMediaQuery } from "@/lib/hooks";
 import { useMemo, useState } from "react";
 import snapshot from "@/content/northstar-snapshot.json";
 import { StatusChip, StatusGlyph } from "@/components/domain/status";
@@ -16,7 +17,7 @@ function Sheet({ children, className = "" }: { children: React.ReactNode; classN
 
 /** A claim card wired to its spreadsheet cells by a drawn hairline. */
 export function ClaimEvidenceFigure() {
-  const reduced = useReducedMotion();
+  const reduced = useMediaQuery("(prefers-reduced-motion: reduce)");
   const years = Object.keys(S.revenue);
   return (
     <figure className="relative grid gap-4 md:grid-cols-[1fr_88px_1fr] md:items-center">
@@ -67,9 +68,9 @@ export function ContradictionFigure() {
   );
 }
 
-/** Reported to verified EBITDA, rejected items hatched. */
+/** Reported to verified EBITDA as a bridge on a truncated axis so each add-back is legible. */
 export function WaterfallFigure() {
-  const reduced = useReducedMotion();
+  const reduced = useMediaQuery("(prefers-reduced-motion: reduce)");
   const steps = useMemo(() => {
     const reported = Number(S.ebitda.reported);
     let run = reported;
@@ -78,32 +79,39 @@ export function WaterfallFigure() {
     out.push({ label: "Verified adjusted EBITDA", amount: run, included: true, decision: "verified", from: 0, to: run });
     return out;
   }, []);
-  const max = Number(S.ebitda.seller) * 1.06;
-  const W = 900, H = 300, padL = 56, padB = 64, padT = 20;
-  const innerH = H - padT - padB, innerW = W - padL - 16;
-  const y = (v: number) => padT + innerH - (v / max) * innerH;
-  const slot = innerW / steps.length, bw = Math.min(64, slot * 0.6);
+  const seller = Number(S.ebitda.seller);
+  const floor = 1_500_000, ceil = 2_200_000;
+  const W = 900, H = 340, padL = 64, padR = 16, padT = 44, padB = 70;
+  const innerH = H - padT - padB, innerW = W - padL - padR;
+  const y = (v: number) => padT + innerH - ((Math.max(floor, v) - floor) / (ceil - floor)) * innerH;
+  const slot = innerW / steps.length, bw = Math.min(72, slot * 0.62);
+  const ticks = [1_500_000, 1_700_000, 1_900_000, 2_100_000];
   return (
     <figure>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Waterfall from reported EBITDA of $1.64M through five seller add-backs to verified adjusted EBITDA of $1.81M; the seller claimed $2.10M">
-        <defs><pattern id="lp-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="var(--chart-graphite)" strokeWidth="1.5" /></pattern></defs>
-        <line x1={padL} x2={W - 16} y1={y(Number(S.ebitda.seller))} y2={y(Number(S.ebitda.seller))} stroke="var(--chart-graphite)" strokeDasharray="4 3" />
-        <text x={W - 16} y={y(Number(S.ebitda.seller)) - 6} textAnchor="end" fontSize="12" fontFamily="var(--font-mono)" fill="var(--fg-muted)">seller says {fmtMoney(S.ebitda.seller, { compact: true })}</text>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Bridge from reported EBITDA of $1.64M through five seller add-backs to verified adjusted EBITDA of $1.81M; the seller claimed $2.10M. Axis starts at $1.5M.">
+        <defs><pattern id="lp-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="var(--chart-graphite)" strokeWidth="1.6" /></pattern></defs>
+        {ticks.map((t) => <g key={t}><line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--hairline)" /><text x={padL - 8} y={y(t) + 4} textAnchor="end" fontSize="11" fontFamily="var(--font-mono)" fill="var(--fg-muted)">{fmtMoney(t, { compact: true })}</text></g>)}
+        <line x1={padL} x2={W - padR} y1={y(seller)} y2={y(seller)} stroke="var(--chart-graphite)" strokeDasharray="5 4" />
+        <text x={padL + 6} y={y(seller) - 6} fontSize="11" fontFamily="var(--font-mono)" fill="var(--fg-muted)">seller&apos;s adjusted EBITDA {fmtMoney(seller, { compact: true })}</text>
         {steps.map((s, i) => {
           const x = padL + i * slot + (slot - bw) / 2;
-          const top = Math.max(s.from, s.to), bottom = Math.min(s.from, s.to);
           const isTotal = s.decision === "reported" || s.decision === "verified";
+          const top = isTotal ? s.to : Math.max(s.from, s.to), bottom = isTotal ? floor : Math.min(s.from, s.to);
+          const h = Math.max(2, y(bottom) - y(top));
           return (
             <g key={s.label}>
-              <motion.rect x={x} width={bw} rx={3} fill={s.included ? "var(--chart-signal)" : "url(#lp-hatch)"} stroke={s.included ? "none" : "var(--chart-graphite)"} strokeDasharray={s.included ? undefined : "3 2"} initial={{ y: reduced ? y(top) : y(bottom), height: reduced ? y(bottom) - y(top) : 0 }} whileInView={{ y: y(top), height: Math.max(2, y(bottom) - y(top)) }} viewport={view} transition={{ duration: 0.55, delay: i * 0.07, ease }} />
+              {i > 0 && !isTotal && <line x1={x - (slot - bw) / 2} x2={x} y1={y(s.from)} y2={y(s.from)} stroke="var(--fg-muted)" strokeWidth="1" />}
+              <motion.rect x={x} width={bw} rx={2} fill={s.included ? "var(--chart-signal)" : "url(#lp-hatch)"} stroke={s.included ? "none" : "var(--chart-graphite)"} strokeDasharray={s.included ? undefined : "3 2"} initial={{ y: reduced ? y(top) : y(bottom), height: reduced ? h : 0 }} whileInView={{ y: y(top), height: h }} viewport={view} transition={{ duration: 0.55, delay: i * 0.07, ease }} />
               <text x={x + bw / 2} y={y(top) - 8} textAnchor="middle" fontSize="12" fontFamily="var(--font-mono)" fill="var(--fg)">{isTotal ? fmtMoney(s.to, { compact: true }) : `+${fmtMoney(s.amount, { compact: true })}`}</text>
+              {isTotal && <text x={x + bw / 2} y={y(floor) - 6} textAnchor="middle" fontSize="10" fontFamily="var(--font-mono)" fill="var(--color-ink-950)" opacity="0.7">from $0</text>}
               <foreignObject x={padL + i * slot} y={H - padB + 8} width={slot} height={padB - 8}><div className="px-1 text-center text-[11px] leading-tight text-fg-muted" style={{ fontFamily: "var(--font-sans)" }}>{s.label}<br /><span className={s.decision === "accepted" || isTotal ? "text-accent" : s.decision === "review_required" ? "text-amber" : "text-graphite"}>{isTotal ? "" : s.decision.replace("_", " ")}</span></div></foreignObject>
             </g>
           );
         })}
-        <line x1={padL} x2={W - 16} y1={y(0)} y2={y(0)} stroke="var(--fg-muted)" />
+        <line x1={padL} x2={W - padR} y1={y(floor)} y2={y(floor)} stroke="var(--fg-muted)" />
+        <g transform={`translate(${padL - 2} ${y(floor) + 2})`} aria-hidden><path d="M-3 0 l3 -5 l3 5 M-3 6 l3 -5 l3 5" stroke="var(--fg-muted)" fill="none" strokeWidth="1" /></g>
       </svg>
-      <figcaption className="mt-3 text-sm text-fg-muted">Solid bars are accepted and counted. Hatched bars were rejected, sent to review, or found unsupported; they stay visible and stay out of the total. Every bar cites a statement line or a note.</figcaption>
+      <figcaption className="mt-3 text-sm text-fg-muted">The axis starts at $1.5M so each step is legible. Solid bars are accepted and counted. Hatched bars were rejected, sent to review, or found unsupported; they stay visible and out of the total. Every bar cites a statement line or a note.</figcaption>
     </figure>
   );
 }

@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
 import { buttonClass } from "@/components/ui/button";
 import { EvidenceCoreStatic } from "@/components/scene/static";
 import { STAGES } from "@/components/scene/storyboard";
@@ -29,7 +29,7 @@ function useWebGL(): boolean | null {
 }
 
 export function Hero() {
-  const reduced = useReducedMotion();
+  const reduced = useMediaQuery("(prefers-reduced-motion: reduce)");
   const webgl = useWebGL();
   const mobile = useMediaQuery("(max-width: 767px)");
   const ref = useRef<HTMLDivElement>(null);

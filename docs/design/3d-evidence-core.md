@@ -42,12 +42,14 @@ Idle (`p` static): slow orbit ±3° over 12s, particles drift, core rim breathes
 
 ## Materials and shaders
 
-- **Documents:** `MeshStandardMaterial` paper `#F5F2EC` roughness 0.9, opacity 0.92, emissive `#15181D`·0.2; edge `LineSegments` `#2C333C`.
-- **Core:** custom `ShaderMaterial` fresnel: `rim = pow(1 - dot(normal, viewDir), 2.4)`; color mix(`#15181D`, `#7FB2FF`, rim), alpha 0.35 + 0.45·rim; additive off; depthWrite off. Inner wireframe `#2C333C`.
+- **Documents:** thin boxes (1 × 1.3 × 0.012) with a procedural canvas "paper with text lines" texture, `MeshPhysicalMaterial` roughness 0.82, sheen 0.4; they cast shadows at tier 3.
+- **Core:** tier 3 `MeshTransmissionMaterial` (real refraction, ior 1.35, slight chromatic aberration); tier 2 `MeshPhysicalMaterial` transmission 0.9; tier 1 the fresnel shell only. Inside: a small emissive signal-blue icosahedron that brightens on the connect pulse. Inner wireframe `#2C333C` at tiers 2 and 3.
 - **Links:** `LineBasicMaterial` vertex colors; draw via `drawRange` progression per link; dashed review links via `LineDashedMaterial` (needs `computeLineDistances`).
 - **Nodes/cells:** `MeshStandardMaterial` with `instanceColor`; roughness 0.6.
-- **Particles:** `PointsMaterial` size 0.02, sizeAttenuation, opacity 0.5, additive off.
-- No post-processing. No shadows.
+- **Particles:** `PointsMaterial` with a procedural radial sprite, additive blending, size 0.045, opacity 0.55.
+- **Lighting:** key directional (shadow-casting at tier 3), signal-blue rim point light, faint amber fill, fog to `#07080A`, and at tiers 2 and 3 a procedural `Environment` built from three `Lightformer`s (no HDR download) plus `ContactShadows` under the composition.
+- **Post-processing (tiers 2 and 3 only):** `Bloom` (threshold 0.72, intensity 0.4 to 0.55) and `Vignette`. Tier 1 and the static fallback have none.
+- **Camera:** slow dolly from z 9 toward 8.2 during the first six stages, easing back for the model and report stages; ACES filmic tone mapping.
 
 ## Interaction
 
@@ -62,9 +64,9 @@ Idle (`p` static): slow orbit ±3° over 12s, particles drift, core rim breathes
 
 | Tier | Trigger | DPR cap | Particles | Docs edges | Antialias | Core shader |
 |---|---|---|---|---|---|---|
-| 3 | desktop, ≥8 cores or discrete GPU hint | 1.75 | 2400 | yes | yes | full |
-| 2 | default desktop/tablet | 1.5 | 1200 | yes | yes | full |
-| 1 | mobile or `deviceMemory ≤ 4` | 1.25 | 600 | no | no | simplified (no inner wireframe) |
+| 3 | desktop, ≥8 cores | 1.75 | 2400 | yes | yes | transmission glass, shadows, bloom |
+| 2 | default desktop/tablet | 1.5 | 1200 | yes | yes | physical transmission, environment, bloom |
+| 1 | mobile or `deviceMemory ≤ 4` | 1.25 | 600 | no | no | fresnel shell, no environment, no post |
 | 0 | WebGL unavailable / context lost / reduced motion | — | — | — | — | static SVG |
 
 Runtime degradation: measure frame time over 2s windows; if average > 22ms, drop one tier (never rises again within the session). `frameloop="demand"` while offscreen (IntersectionObserver).

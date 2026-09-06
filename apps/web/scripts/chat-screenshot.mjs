@@ -15,7 +15,7 @@ const base = p.url().replace(/\/?$/, "");
 await p.goto(`${base}/claims`); await p.waitForTimeout(900);
 await p.screenshot({ path: `${OUT}/04-claim-audit.png` });
 await p.getByRole("button", { name: /Open chat/ }).click();
-await p.getByRole("button", { name: "Why was adjusted EBITDA reduced?" }).click();
+await p.getByRole("button", { name: "Why was adjusted EBITDA reduced?", exact: true }).last().click();
 await p.waitForTimeout(3500);
 await p.screenshot({ path: `${OUT}/12-ask-the-deal.png` });
 await p.goto(`${base}`); await p.waitForTimeout(900);
