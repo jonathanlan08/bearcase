@@ -7,7 +7,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic_core import PydanticCustomError
 
 
 class Out(BaseModel):
@@ -30,25 +31,75 @@ class RegisterRequest(LoginRequest):
     display_name: str = Field(min_length=1, max_length=120)
 
 
+def _money(value: Decimal) -> str:
+    return f"${value:,.2f}".removesuffix(".00")
+
+
 class DealCreate(BaseModel):
+    """Transaction terms. Every amount must be given: a blank is an error, never zero. Debt plus equity must add
+    up to the purchase price, because the engine sizes debt service from purchase_price and debt_amount together
+    (`analyze.py` derives debt_pct = debt_amount / price; the scenario engine splits the price by that share)."""
+
     company_name: str = Field(min_length=1, max_length=200)
     industry: str = Field(min_length=1, max_length=120)
-    purchase_price: Decimal = Field(gt=0)
+    # Money columns are Numeric(20, 2); rates and ratios are Numeric(8, 4).
+    purchase_price: Decimal = Field(gt=0, max_digits=20, decimal_places=2)
     purchase_price_basis: Literal["enterprise_value", "equity_price"] = "enterprise_value"
     purchase_date: date | None = None
-    debt_amount: Decimal = Field(ge=0)
-    equity_amount: Decimal = Field(ge=0)
-    debt_assumed: Decimal = Field(default=Decimal("0"), ge=0)
-    cash_acquired: Decimal = Field(default=Decimal("0"), ge=0)
-    interest_rate_pct: Decimal = Field(ge=0, le=40)
+    debt_amount: Decimal = Field(ge=0, max_digits=20, decimal_places=2)
+    equity_amount: Decimal = Field(ge=0, max_digits=20, decimal_places=2)
+    debt_assumed: Decimal = Field(default=Decimal("0"), ge=0, max_digits=20, decimal_places=2)
+    cash_acquired: Decimal = Field(default=Decimal("0"), ge=0, max_digits=20, decimal_places=2)
+    interest_rate_pct: Decimal = Field(ge=0, le=40, max_digits=8, decimal_places=4)
     amortization_years: int = Field(ge=1, le=40)
     payments_per_year: int = Field(default=12, ge=1, le=12)
-    covenant_dscr_threshold: Decimal | None = Field(default=Decimal("1.25"), ge=0, le=10)
+    covenant_dscr_threshold: Decimal | None = Field(default=Decimal("1.25"), ge=0, le=10, max_digits=8, decimal_places=4)
 
     @field_validator("company_name", "industry")
     @classmethod
     def _strip(cls, v: str) -> str:
         return v.strip()
+
+    @field_validator(
+        "purchase_price",
+        "debt_amount",
+        "equity_amount",
+        "debt_assumed",
+        "cash_acquired",
+        "interest_rate_pct",
+        "amortization_years",
+        "payments_per_year",
+        mode="before",
+    )
+    @classmethod
+    def _blank_is_an_error(cls, v: Any) -> Any:
+        """A blank or null number is reported on its field, never read as zero. A typed string may carry
+        thousands separators and a leading dollar sign ("$1,250,000")."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            raise PydanticCustomError("missing", "Enter a value; this field cannot be blank.")
+        if isinstance(v, str):
+            return v.strip().replace(",", "").removeprefix("$").strip()
+        return v
+
+    @field_validator("covenant_dscr_threshold", mode="before")
+    @classmethod
+    def _blank_threshold_means_none(cls, v: Any) -> Any:
+        return None if isinstance(v, str) and not v.strip() else v
+
+    @field_validator("equity_amount")
+    @classmethod
+    def _funding_matches_price(cls, v: Decimal, info: ValidationInfo) -> Decimal:
+        price, debt = info.data.get("purchase_price"), info.data.get("debt_amount")
+        if price is None or debt is None:
+            return v  # those fields already carry their own error
+        total = debt + v
+        if abs(total - price) > price * Decimal("0.01"):
+            raise PydanticCustomError(
+                "funding_mismatch",
+                f"Debt plus equity is {_money(total)}, but the purchase price is {_money(price)}. "
+                "The funding must add up to the price (within 1%); adjust the debt, the equity, or the price.",
+            )
+        return v
 
 
 class DealOut(Out):

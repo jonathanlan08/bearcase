@@ -8,7 +8,7 @@ import { ContactShadows, Environment, Html, Lightformer, MeshTransmissionMateria
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { DOC_LABELS, NODES, ramp, type Status } from "@/components/scene/storyboard";
+import { DOC_LABELS, NODES, ramp, statusReveal, storyProgress, type SceneStore, type Status } from "@/components/scene/storyboard";
 
 /* ---------- quality tiers ---------- */
 type Tier = 1 | 2 | 3;
@@ -36,6 +36,19 @@ const C = {
   graphite: new THREE.Color("#8A94A0"),
 };
 const STATUS_COLOR: Record<Status, THREE.Color> = { supported: C.signal, contradicted: C.red, unsupported: C.graphite, review: C.amber };
+/** Claims start as claims (warm neutral) and take their status colour only when chapter 2 reveals the verdict. */
+const NEUTRAL = C.paper.clone().multiplyScalar(0.72);
+
+/* ---------- viewport framing ----------
+   The hero measures the part of the viewport that is free for the composition (right of the copy on wide screens, the band
+   between captions and copy on stacked layouts) and the camera frames the story inside it: the core sits in that region for
+   chapters 1–2, and the late-stage cluster (core drifting to x −1.6 … report stack at x 3.2, about 5.5 units wide) is centred
+   and scaled by `fit` so it never spills over the headline. Portrait viewports also dolly out so the core fits the band.
+   `spread` narrows the document arc slightly on wide aspects so the far documents stay in frame beside the copy. */
+const TAN_HALF_FOV = Math.tan((32 / 2) * (Math.PI / 180));
+const CLUSTER_WIDTH = 5.5;
+const CLUSTER_CENTER = new THREE.Vector2(0.45, -0.1);
+interface Frame { spread: number; fit: number; axisX: number; axisY: number; z: number; settled: boolean }
 
 /* ---------- procedural "paper with text lines" texture (no image assets) ---------- */
 let paperTexture: THREE.CanvasTexture | null = null;
@@ -80,15 +93,16 @@ function getSprite(): THREE.CanvasTexture | null {
 }
 
 /* ---------- shared, mutable scene state (one object, updated per frame) ---------- */
-interface SceneState { p: number; pointer: THREE.Vector2; drag: THREE.Vector2; selected: number | null; hover: number | null; degrade: () => void }
+interface SceneState { p: number; pointer: THREE.Vector2; drag: THREE.Vector2; selected: number | null; hover: number | null; frame: Frame; degrade: () => void }
 
 const tmp = new THREE.Object3D();
 const v3 = new THREE.Vector3();
+const tmpColor = new THREE.Color();
 
-/* Document anchor positions (arc in front of the core), and their target "recede" positions. */
-function docPose(i: number, n: number, p: number): { pos: THREE.Vector3; rot: THREE.Euler; scale: number } {
+/* Document anchor positions (arc in front of the core), and their target "recede" positions. `spread` (0.75–1) narrows the arc on wide aspects. */
+function docPose(i: number, n: number, p: number, spread: number): { pos: THREE.Vector3; rot: THREE.Euler; scale: number } {
   const t = n === 1 ? 0.5 : i / (n - 1);
-  const angle = (t - 0.5) * Math.PI * 0.9;
+  const angle = (t - 0.5) * Math.PI * 0.9 * spread;
   const enter = ramp(p, 0, 0.1);
   const recede = ramp(p, 0.68, 0.8);
   const r = 3.4 + recede * 1.8;
@@ -141,7 +155,7 @@ function Documents({ state, count, edges }: { state: SceneState; count: number; 
   useFrame(() => {
     if (!mesh.current) return;
     for (let i = 0; i < count; i++) {
-      const { pos, rot, scale } = docPose(i, count, state.p);
+      const { pos, rot, scale } = docPose(i, count, state.p, state.frame.spread);
       tmp.position.copy(pos);
       tmp.rotation.copy(rot);
       tmp.scale.setScalar(scale);
@@ -152,7 +166,7 @@ function Documents({ state, count, edges }: { state: SceneState; count: number; 
     const fade = 1 - ramp(state.p, 0.9, 1) * 0.9;
     (mesh.current.material as THREE.MeshStandardMaterial).opacity = 0.92 * fade;
     if (edgeRef.current) {
-      const { pos, rot } = docPose(0, count, state.p);
+      const { pos, rot } = docPose(0, count, state.p, state.frame.spread);
       edgeRef.current.position.copy(pos);
       edgeRef.current.rotation.copy(rot);
       (edgeRef.current.material as THREE.LineBasicMaterial).opacity = 0.6 * fade;
@@ -182,7 +196,7 @@ function Fragments({ state, count }: { state: SceneState; count: number }) {
     const gone = ramp(p, 0.3, 0.4);
     for (let i = 0; i < N; i++) {
       const s = seeds[i];
-      const { pos } = docPose(s.doc, count, p);
+      const { pos } = docPose(s.doc, count, p, state.frame.spread);
       const start = pos.clone().add(new THREE.Vector3(s.ox, s.oy, 0.02));
       const lifted = start.clone().add(new THREE.Vector3(0, 0.35 * lift, 0.5 * lift));
       const ctrl = lifted.clone().lerp(new THREE.Vector3(0, 0.6, 1.4), 0.5).add(new THREE.Vector3(0, 0.6, 0));
@@ -274,19 +288,23 @@ function ClaimNodes({ state, docCount, onSelect }: { state: SceneState; docCount
     const p = state.p;
     const t = performance.now() / 1000;
     for (let i = 0; i < NODES.length; i++) {
-      const doc = docPose(NODES[i].doc % docCount, docCount, p).pos;
+      const n = NODES[i];
+      const doc = docPose(n.doc % docCount, docCount, p, state.frame.spread).pos;
       const pos = nodePose(i, p, doc);
       const a = nodeAlpha(i, p);
       let s = 0.09 * a;
-      if (NODES[i].status === "contradicted") s *= 1 + Math.sin(t * 5) * 0.08 * ramp(p, 0.5, 0.6) * (1 - ramp(p, 0.68, 0.72));
+      if (n.hero) s *= 1.35;
+      if (n.status === "contradicted") s *= 1 + Math.sin(t * 5) * 0.08 * ramp(p, 0.5, 0.6) * (1 - ramp(p, 0.68, 0.72));
       if (state.selected === i || state.hover === i) s *= 1.5;
       tmp.position.copy(pos);
       tmp.rotation.set(0, 0, 0);
       tmp.scale.setScalar(Math.max(0.0001, s));
       tmp.updateMatrix();
       mesh.current.setMatrixAt(i, tmp.matrix);
+      tmpColor.copy(NEUTRAL).lerp(STATUS_COLOR[n.status], statusReveal(n.status, p)).toArray(colorAttr, i * 3);
     }
     mesh.current.instanceMatrix.needsUpdate = true;
+    if (mesh.current.instanceColor) mesh.current.instanceColor.needsUpdate = true;
   });
   return (
     <instancedMesh ref={mesh} args={[undefined, undefined, NODES.length]} frustumCulled={false} onClick={(e) => { e.stopPropagation(); onSelect(e.instanceId ?? null); }} onPointerOver={(e) => { state.hover = e.instanceId ?? null; document.body.style.cursor = "pointer"; }} onPointerOut={() => { state.hover = null; document.body.style.cursor = ""; }}>
@@ -312,19 +330,19 @@ function Links({ state, docCount }: { state: SceneState; docCount: number }) {
     const t = performance.now() / 1000;
     for (let i = 0; i < NODES.length; i++) {
       const n = NODES[i];
-      const doc = docPose(n.doc % docCount, docCount, p).pos;
+      const doc = docPose(n.doc % docCount, docCount, p, state.frame.spread).pos;
       const a = nodePose(i, p, doc);
       const target = doc.clone().add(new THREE.Vector3(0.1, 0.25, 0.05));
       let vis = draw;
       if (n.status === "unsupported") vis *= 1 - ramp(p, 0.6, 0.66);
-      if (n.status === "supported" && p > 0.68) target.lerp(new THREE.Vector3(-1.6 - ramp(p, 0.68, 0.8) * 0, 0.2, 0.4), ramp(p, 0.68, 0.8));
+      if (n.status === "supported" && p > 0.68) target.lerp(new THREE.Vector3(-1.6, 0.2, 0.4), ramp(p, 0.68, 0.8));
       vis *= 1 - ramp(p, 0.92, 1) * 0.8;
       const b = a.clone().lerp(target, vis);
       pos.setXYZ(i * 2, a.x, a.y, a.z);
       pos.setXYZ(i * 2 + 1, b.x, b.y, b.z);
-      const base = STATUS_COLOR[n.status].clone();
+      const base = tmpColor.copy(NEUTRAL).lerp(STATUS_COLOR[n.status], statusReveal(n.status, p));
       const active = state.selected === i || state.hover === i;
-      let k = active ? 1 : 0.55;
+      let k = active ? 1 : n.hero ? 0.8 : 0.55;
       if (n.status === "contradicted") k *= 0.7 + 0.3 * Math.abs(Math.sin(t * 2.5)) * ramp(p, 0.5, 0.6) + (active ? 0.3 : 0);
       base.multiplyScalar(k);
       col.setXYZ(i * 2, base.r, base.g, base.b);
@@ -450,7 +468,7 @@ function Particles({ state, count }: { state: SceneState; count: number }) {
   return (<points ref={ref} geometry={geo} frustumCulled={false}><pointsMaterial color={C.paper} size={0.045} sizeAttenuation transparent opacity={0.55} depthWrite={false} map={getSprite() ?? undefined} alphaMap={getSprite() ?? undefined} blending={THREE.AdditiveBlending} /></points>);
 }
 
-/* ---------- Rig: parallax, drag, recenter, quality watchdog ---------- */
+/* ---------- Rig: parallax, drag, recenter, late-stage fit, quality watchdog ---------- */
 function Rig({ state, children }: { state: SceneState; children: React.ReactNode }) {
   const group = useRef<THREE.Group>(null);
   const yaw = useRef(0), pitch = useRef(0);
@@ -464,9 +482,11 @@ function Rig({ state, children }: { state: SceneState; children: React.ReactNode
     yaw.current = THREE.MathUtils.damp(yaw.current, THREE.MathUtils.clamp(targetYaw, -0.45, 0.45), 4, dt);
     pitch.current = THREE.MathUtils.damp(pitch.current, THREE.MathUtils.clamp(targetPitch, -0.22, 0.22), 4, dt);
     group.current.rotation.set(pitch.current, yaw.current, 0);
+    group.current.scale.setScalar(1 - ramp(state.p, 0.68, 0.8) * (1 - state.frame.fit));
     state.drag.x = THREE.MathUtils.damp(state.drag.x, 0, 1.2, dt);
     state.drag.y = THREE.MathUtils.damp(state.drag.y, 0, 1.2, dt);
-    frames.current.push(dt);
+    // Quality watchdog: average frame time over ~90 frames; a hidden tab or a debugger pause produces one huge delta, which is not a slow GPU.
+    if (dt < 0.1) frames.current.push(dt);
     if (frames.current.length >= 90) {
       const avg = frames.current.reduce((a, b) => a + b, 0) / frames.current.length;
       frames.current = [];
@@ -476,7 +496,7 @@ function Rig({ state, children }: { state: SceneState; children: React.ReactNode
   return <group ref={group}>{children}</group>;
 }
 
-function Scene({ state, tier, onSelect, selected }: { state: SceneState; tier: Tier; onSelect: (i: number | null) => void; selected: number | null }) {
+function Scene({ state, story, tier, post, onSelect, selected }: { state: SceneState; story: SceneStore; tier: Tier; post: boolean; onSelect: (i: number | null) => void; selected: number | null }) {
   const q = TIERS[tier];
   const node = selected !== null ? NODES[selected] : null;
   const docCount = q.docs;
@@ -496,7 +516,7 @@ function Scene({ state, tier, onSelect, selected }: { state: SceneState; tier: T
         </Environment>
       )}
       {tier > 1 && <ContactShadows position={[0, -2.6, 0]} opacity={0.55} scale={22} blur={2.4} far={6} color="#000" frames={1} />}
-      <CameraDolly state={state} />
+      <Framing state={state} story={story} />
       <Rig state={state}>
         <Documents state={state} count={docCount} edges={q.edges} />
         {tier > 1 && <Fragments state={state} count={docCount} />}
@@ -509,7 +529,7 @@ function Scene({ state, tier, onSelect, selected }: { state: SceneState; tier: T
         {node && selected !== null && (
           <NodeAnchor state={state} index={selected} docCount={docCount}>
           <Html center distanceFactor={8} zIndexRange={[30, 0]} style={{ pointerEvents: "auto" }}>
-            <div role="dialog" aria-label={node.label} className="w-56 rounded-[6px] border border-ink-600 bg-ink-900/95 p-3 text-paper-50 shadow-lg" style={{ fontFamily: "var(--font-sans)" }}>
+            <div role="dialog" aria-label={node.label} className="w-56 rounded-[var(--radius-2)] border border-ink-600 bg-ink-900/95 p-3 text-paper-50 shadow-lg" style={{ fontFamily: "var(--font-sans)" }}>
               <p className="micro" style={{ color: STATUS_COLOR[node.status].getStyle() }}>{node.status === "review" ? "review required" : node.status}</p>
               <p className="mt-1 text-sm leading-snug">{node.label}</p>
               <p className="mt-1 text-xs text-graphite-400">{node.value} · {DOC_LABELS[node.doc]}</p>
@@ -519,7 +539,7 @@ function Scene({ state, tier, onSelect, selected }: { state: SceneState; tier: T
           </NodeAnchor>
         )}
       </Rig>
-      {tier > 1 && (
+      {post && (
         <EffectComposer multisampling={0} enableNormalPass={false}>
           <Bloom intensity={tier === 3 ? 0.55 : 0.4} luminanceThreshold={0.72} luminanceSmoothing={0.25} mipmapBlur />
           <Vignette eskil={false} offset={0.2} darkness={0.55} />
@@ -529,29 +549,65 @@ function Scene({ state, tier, onSelect, selected }: { state: SceneState; tier: T
   );
 }
 
-/** Slow dolly-in and a gentle lift as the story progresses; the reader feels the scene resolve. */
-function CameraDolly({ state }: { state: SceneState }) {
+/** Frames the composition inside the free region every frame (runs before the entities, priority −1), then the slow dolly-in
+ *  and gentle lift as the story progresses. Writes `state.frame` for the rig and the document arc and drives the camera.
+ *  A world point X appears at viewport fraction f when the camera axis is at X − (f − 0.5) · 2 · halfWidth. */
+function Framing({ state, story }: { state: SceneState; story: SceneStore }) {
   const { camera } = useThree();
-  useFrame((_, dt) => {
+  useFrame(({ size }, dt) => {
     const p = state.p;
-    const targetZ = 9 - ramp(p, 0, 0.6) * 0.8 + ramp(p, 0.68, 0.9) * 0.6;
-    const targetY = 0.4 - ramp(p, 0.68, 1) * 0.35;
-    camera.position.z = THREE.MathUtils.damp(camera.position.z, targetZ, 2.5, dt);
-    camera.position.y = THREE.MathUtils.damp(camera.position.y, targetY, 2.5, dt);
-    camera.lookAt(0.4 * ramp(p, 0.68, 1), 0, 0);
+    const f = state.frame;
+    const r = story.region;
+    const aspect = size.width / Math.max(1, size.height);
+    const late = ramp(p, 0.68, 1);
+    const zBase = 9.8 + THREE.MathUtils.clamp((1.2 - aspect) * 4, 0, 3) + THREE.MathUtils.clamp((aspect - 1) * 3, 0, 0.6);
+    const z = zBase - ramp(p, 0, 0.6) * 0.8 + ramp(p, 0.68, 0.9) * 0.6;
+    const halfH = z * TAN_HALF_FOV, halfW = halfH * aspect;
+    const spread = 1 - THREE.MathUtils.clamp((aspect - 1.15) * 0.5, 0, 0.25);
+    const fit = THREE.MathUtils.clamp(((r.right - r.left) * 2 * halfW * 0.9) / CLUSTER_WIDTH, 0.55, 0.85);
+    // Chapters 1–2: the core in the free region, no further from the middle than it takes to clear the copy by its radius.
+    const coreFrac = 1.15 / (2 * halfW);
+    const cx12 = Math.min((r.left + r.right) / 2, Math.max(0.5, r.left + coreFrac + 0.03));
+    const cx3 = (r.left + r.right) / 2;
+    const cy = (r.top + r.bottom) / 2;
+    const axisX = THREE.MathUtils.lerp(-(cx12 - 0.5) * 2 * halfW, CLUSTER_CENTER.x * fit - (cx3 - 0.5) * 2 * halfW, late);
+    const axisY = THREE.MathUtils.lerp(0, CLUSTER_CENTER.y * fit, late) + (cy - 0.5) * 2 * halfH;
+    if (!f.settled) { f.axisX = axisX; f.axisY = axisY; f.z = z; f.settled = true; }
+    f.axisX = THREE.MathUtils.damp(f.axisX, axisX, 2.5, dt);
+    f.axisY = THREE.MathUtils.damp(f.axisY, axisY, 2.5, dt);
+    f.z = THREE.MathUtils.damp(f.z, z, 2.5, dt);
+    f.spread = spread;
+    f.fit = fit;
+    camera.position.set(f.axisX, f.axisY + 0.4 - late * 0.35, f.z);
+    camera.lookAt(f.axisX, f.axisY, 0);
+  }, -1);
+  return null;
+}
+
+/** Counts rendered frames: the first one tells the hero the canvas is drawn (crossfade the static image out); the `warmAfter`th
+ *  turns post-processing on, so bloom and vignette are paid for only after the scene has been visible and stable. Frames only
+ *  run while the canvas is on screen (`frameloop="demand"` offscreen), so both callbacks imply visibility. */
+function FrameCounter({ onFirst, onWarm, warmAfter }: { onFirst: () => void; onWarm: () => void; warmAfter: number }) {
+  const n = useRef(0);
+  useFrame(() => {
+    n.current += 1;
+    if (n.current === 1) onFirst();
+    else if (n.current === warmAfter) onWarm();
   });
   return null;
 }
 
-export function EvidenceCoreScene({ progress, mobile, onReady, onFail }: { progress: number; mobile: boolean; onReady: () => void; onFail: () => void }) {
+export function EvidenceCoreScene({ story, mobile, onReady, onFail }: { story: SceneStore; mobile: boolean; onReady: () => void; onFail: () => void }) {
   const [tier, setTier] = useState<Tier>(() => detectTier(mobile));
   const [selected, setSelected] = useState<number | null>(null);
-  const [visible, setVisible] = useState(true);
+  const [visible, setVisible] = useState(false);
+  const [warm, setWarm] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
-  const [state] = useState<SceneState>(() => ({ p: 0, pointer: new THREE.Vector2(0, 0), drag: new THREE.Vector2(0, 0), selected: null, hover: null, degrade: () => setTier((t) => (t > 1 ? ((t - 1) as Tier) : t)) }));
-  const target = useRef(0);
-  useEffect(() => { target.current = progress; }, [progress]);
+  const alive = useRef(true);
+  const [state] = useState<SceneState>(() => ({ p: 0, pointer: new THREE.Vector2(0, 0), drag: new THREE.Vector2(0, 0), selected: null, hover: null, frame: { spread: 1, fit: 1, axisX: 0, axisY: 0, z: 9.8, settled: false }, degrade: () => setTier((t) => (t > 1 ? ((t - 1) as Tier) : t)) }));
   useEffect(() => { state.selected = selected; }, [selected, state]);
+  // Unmounting the canvas (Pause 3D) makes R3F force a context loss; that is not a failure, so the handler below ignores loss on a canvas that is no longer live.
+  useEffect(() => () => { alive.current = false; }, []);
   useEffect(() => {
     const el = wrap.current;
     if (!el) return;
@@ -578,9 +634,10 @@ export function EvidenceCoreScene({ progress, mobile, onReady, onFail }: { progr
   const q = TIERS[tier];
   return (
     <div ref={wrap} className="h-full w-full" style={{ touchAction: "pan-y" }} onPointerMove={onPointerMove} onPointerDown={(e) => { if (e.pointerType === "mouse" && e.button !== 0) return; dragging.current = { x: e.clientX, y: e.clientY }; }} onPointerUp={() => { dragging.current = null; }} onPointerLeave={() => { dragging.current = null; state.pointer.set(0, 0); }}>
-      <Canvas dpr={[1, q.dpr]} frameloop={visible ? "always" : "demand"} shadows={tier === 3 ? { type: THREE.PCFShadowMap } : false} gl={{ antialias: q.aa, powerPreference: "high-performance", alpha: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }} camera={{ fov: 32, position: [0, 0.4, 9], near: 0.1, far: 60 }} onCreated={({ gl }) => { gl.domElement.addEventListener("webglcontextlost", (ev) => { ev.preventDefault(); onFail(); }); onReady(); }} onPointerMissed={() => setSelected(null)} aria-label="The Evidence Core: deal documents become sourced claims, contradictions, a verified financial model, a downside scenario, and a report" role="img">
-        <ProgressDriver state={state} target={target} />
-        <Scene state={state} tier={tier} onSelect={setSelected} selected={selected} />
+      <Canvas dpr={[1, q.dpr]} frameloop={visible ? "always" : "demand"} shadows={tier === 3 ? { type: THREE.PCFShadowMap } : false} gl={{ antialias: q.aa, powerPreference: "high-performance", alpha: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }} camera={{ fov: 32, position: [0, 0.4, 9], near: 0.1, far: 60 }} onCreated={({ gl }) => { gl.domElement.addEventListener("webglcontextlost", (ev) => { ev.preventDefault(); if (alive.current && gl.domElement.isConnected) onFail(); }); }} onPointerMissed={() => setSelected(null)} aria-label="The Evidence Core: a seller's claim of 18% growth leaves the memo, the income statement shows 11.6% and the claim turns contradicted, then the verified figures assemble into a financial model, a downside case, and a report" role="img">
+        <FrameCounter onFirst={onReady} onWarm={() => setWarm(true)} warmAfter={8} />
+        <ProgressDriver state={state} story={story} />
+        <Scene state={state} story={story} tier={tier} post={warm && tier > 1} onSelect={setSelected} selected={selected} />
       </Canvas>
       <ul className="sr-only" aria-label="Claims in the scene">
         {NODES.map((n, i) => <li key={n.id}><button type="button" onClick={() => setSelected(i)}>{n.label}: {n.status === "review" ? "review required" : n.status}</button></li>)}
@@ -594,13 +651,14 @@ function NodeAnchor({ state, index, docCount, children }: { state: SceneState; i
   const g = useRef<THREE.Group>(null);
   useFrame(() => {
     if (!g.current) return;
-    const doc = docPose(NODES[index].doc % docCount, docCount, state.p).pos;
+    const doc = docPose(NODES[index].doc % docCount, docCount, state.p, state.frame.spread).pos;
     g.current.position.copy(nodePose(index, state.p, doc));
   });
   return <group ref={g}>{children}</group>;
 }
 
-function ProgressDriver({ state, target }: { state: SceneState; target: React.MutableRefObject<number> }) {
-  useFrame((_, dt) => { state.p = THREE.MathUtils.damp(state.p, target.current, 6, dt); });
+/** Eases storyboard progress toward the scroll-driven target each frame; reads the store directly, so scrolling never re-renders React here. */
+function ProgressDriver({ state, story }: { state: SceneState; story: SceneStore }) {
+  useFrame((_, dt) => { state.p = THREE.MathUtils.damp(state.p, storyProgress(story.get()), 6, dt); });
   return null;
 }

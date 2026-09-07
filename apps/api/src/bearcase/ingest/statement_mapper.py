@@ -87,13 +87,33 @@ def _match_line(label: str) -> tuple[str | None, float]:
     return best
 
 
+# Sheet titles that name the same statement. The classifier accepts any of these, so the mapper must too; a
+# workbook whose income statement is on a sheet called "P&L" otherwise produced no statement at all.
+SHEET_ALIASES: dict[str, tuple[str, ...]] = {
+    "income statement": ("income statement", "profit and loss", "profit & loss", "p&l", "p & l"),
+}
+
+
+def _sheet_matches(title: str, hint: str) -> bool:
+    norm = re.sub(r"\s+", " ", title.lower()).strip()
+    return any(alias in norm for alias in SHEET_ALIASES.get(hint, (hint,)))
+
+
 def map_income_statement(chunks: list[ParsedChunk], sheet_title_hint: str = "income statement") -> StatementMap | None:
-    rows = [
-        (i, c) for i, c in enumerate(chunks) if c.kind == "sheet_row" and sheet_title_hint in c.locator.get("sheet", "").lower()
-    ]
-    if not rows:
-        return None
-    sheet = rows[0][1].locator["sheet"]
+    """Map the first sheet whose title names the statement and whose rows carry period columns. Rows from
+    different sheets are never combined: a workbook with both a "P&L" and a "P&L (prior year)" sheet maps one."""
+    by_sheet: dict[str, list[tuple[int, ParsedChunk]]] = {}
+    for i, c in enumerate(chunks):
+        if c.kind == "sheet_row" and _sheet_matches(c.locator.get("sheet", ""), sheet_title_hint):
+            by_sheet.setdefault(c.locator["sheet"], []).append((i, c))
+    for sheet, rows in by_sheet.items():
+        smap = _map_sheet(sheet, rows)
+        if smap is not None:
+            return smap
+    return None
+
+
+def _map_sheet(sheet: str, rows: list[tuple[int, ParsedChunk]]) -> StatementMap | None:
     header: list[str] | None = None
     header_row = None
     period_cols: dict[int, str] = {}

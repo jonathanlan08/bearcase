@@ -61,12 +61,12 @@ def export(deal: DealDep, report_id: uuid.UUID, db: DbDep, format: str = "md") -
     slug = "".join(ch if ch.isalnum() else "-" for ch in deal.company_name.lower()).strip("-")[:40]
     if format == "pdf":
         return Response(
-            to_pdf(r, deal.company_name),
+            to_pdf(r, deal.company_name, deal.is_demo),
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="bearcase-{slug}-v{r.version_no}.pdf"'},
         )
     return Response(
-        to_markdown(r, deal.company_name),
+        to_markdown(r, deal.company_name, deal.is_demo),
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="bearcase-{slug}-v{r.version_no}.md"'},
     )

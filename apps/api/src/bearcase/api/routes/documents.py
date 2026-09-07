@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, HTTPException, Query, UploadFile
 from sqlalchemy import func, select
 
 from bearcase.api.deps import DbDep, DealDep, UserDep
@@ -57,7 +57,7 @@ def store_document(db, deal: Deal, user_id: uuid.UUID, filename: str, content_ty
         event_type="document.uploaded",
         object_type="document",
         object_id=doc.id,
-        summary=f"Uploaded {doc.display_name} ({v.size_bytes} bytes)",
+        summary=f"Uploaded {doc.display_name} ({max(1, round(v.size_bytes / 1024))} KB)",
         payload={"sha256": v.sha256, "extension": v.extension},
     )
     return doc
@@ -68,21 +68,74 @@ def list_documents(deal: DealDep, db: DbDep) -> list[DocumentOut]:
     return [doc_out(db, d) for d in db.scalars(select(Document).where(Document.deal_id == deal.id).order_by(Document.created_at))]
 
 
+def user_storage_bytes(db, user_id: uuid.UUID) -> int:  # type: ignore[no-untyped-def]
+    """Bytes stored across all of a user's deals, every document version counted."""
+    total = db.scalar(
+        select(func.coalesce(func.sum(DocumentVersion.size_bytes), 0))
+        .join(Document, Document.id == DocumentVersion.document_id)
+        .join(Deal, Deal.id == Document.deal_id)
+        .where(Deal.owner_id == user_id)
+    )
+    return int(total or 0)
+
+
+def _mb(n: int) -> str:
+    value = n / (1024 * 1024)
+    return f"{value:,.0f} MB" if value >= 10 or value == int(value) else f"{value:,.1f} MB"
+
+
+# When every file in a request is refused, the status says why: too big for the size or storage limit, the deal
+# is full, or (422) the files themselves were not acceptable.
+_STATUS_BY_CODE = {"too_large": 413, "storage_limit": 413, "document_limit": 400}
+
+
 @router.post("/deals/{deal_id}/documents", response_model=list[DocumentOut], status_code=201)
 async def upload_documents(
     deal: DealDep, db: DbDep, user: UserDep, files: list[UploadFile], process: bool = True
 ) -> list[DocumentOut]:
+    s = get_settings()
+    per_file_limit = f"{s.max_upload_bytes // (1024 * 1024)} MB"
+    existing = db.scalar(select(func.count(Document.id)).where(Document.deal_id == deal.id)) or 0
+    used = user_storage_bytes(db, user.id)
     created: list[Document] = []
     errors: list[dict[str, str]] = []
     for up in files:
-        data = await up.read()
+        name = up.filename or "upload"
+        # Read at most one byte past the limit: an oversized file is refused before it is hashed, validated, or
+        # parsed, and never sits in memory whole.
+        data = await up.read(s.max_upload_bytes + 1)
+        if len(data) > s.max_upload_bytes:
+            errors.append({"file": name, "code": "too_large", "message": f"{name} is larger than the {per_file_limit} limit."})
+            continue
+        if existing + len(created) >= s.max_documents_per_deal:
+            errors.append(
+                {
+                    "file": name,
+                    "code": "document_limit",
+                    "message": f"This deal already holds {s.max_documents_per_deal:,} documents, the maximum. "
+                    "Create another deal for more files.",
+                }
+            )
+            continue
+        if used + len(data) > s.max_storage_bytes_per_user:
+            errors.append(
+                {
+                    "file": name,
+                    "code": "storage_limit",
+                    "message": f"Adding {name} ({_mb(len(data))}) would exceed your storage allowance of "
+                    f"{_mb(s.max_storage_bytes_per_user)}; {_mb(used)} is in use across your deals.",
+                }
+            )
+            continue
         try:
-            created.append(store_document(db, deal, user.id, up.filename or "upload", up.content_type, data))
+            created.append(store_document(db, deal, user.id, name, up.content_type, data))
+            used += len(data)
         except UploadRejected as exc:
-            errors.append({"file": up.filename or "upload", "code": exc.code, "message": exc.message})
+            errors.append({"file": name, "code": exc.code, "message": exc.message})
     if errors and not created:
         db.rollback()
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, {"errors": errors})
+        code = next((_STATUS_BY_CODE[e["code"]] for e in errors if e["code"] in _STATUS_BY_CODE), 422)
+        raise HTTPException(code, {"errors": errors})
     job_ids = []
     if process:
         for doc in created:

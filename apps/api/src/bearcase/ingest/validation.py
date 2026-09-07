@@ -14,6 +14,11 @@ MIME_BY_EXT = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "csv": "text/csv",
 }
+# A workbook is a zip archive, and a small archive can expand to a very large one. Both budgets are checked
+# from the archive directory before any part is decompressed. A real statement workbook has tens of parts and
+# expands to a few megabytes; these limits leave room for large models without allowing a decompression bomb.
+XLSX_MAX_ENTRIES = 10_000
+XLSX_MAX_EXPANDED_BYTES = 100 * 1024 * 1024
 
 
 class UploadRejected(ValueError):
@@ -51,7 +56,20 @@ def detect_type(data: bytes) -> str | None:
     if data.startswith(b"PK\x03\x04"):
         try:
             with zipfile.ZipFile(BytesIO(data)) as zf:
-                names = set(zf.namelist())
+                entries = zf.infolist()
+                if len(entries) > XLSX_MAX_ENTRIES:
+                    raise UploadRejected(
+                        "archive_entries",
+                        f"The workbook archive has {len(entries):,} parts; the limit is {XLSX_MAX_ENTRIES:,}.",
+                    )
+                expanded = sum(e.file_size for e in entries)
+                if expanded > XLSX_MAX_EXPANDED_BYTES:
+                    raise UploadRejected(
+                        "expanded_size",
+                        f"The workbook expands to {expanded // (1024 * 1024):,} MB when opened; "
+                        f"the limit is {XLSX_MAX_EXPANDED_BYTES // (1024 * 1024)} MB.",
+                    )
+                names = {e.filename for e in entries}
                 if "[Content_Types].xml" in names and any(n.startswith("xl/") for n in names):
                     if any(n.startswith("xl/vbaProject") for n in names):
                         raise UploadRejected("macro_workbook", "Workbooks containing VBA macros are not accepted.")

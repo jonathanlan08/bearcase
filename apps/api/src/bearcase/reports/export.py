@@ -19,20 +19,26 @@ def _cite(st: dict[str, Any]) -> str:
     return f" [{', '.join(refs)}]" if refs else ""
 
 
-def to_markdown(report: Report, company: str) -> str:
+def to_markdown(report: Report, company: str, is_demo: bool = True) -> str:
     lines = [
         f"# Red-team review: {company}",
         "",
         f"Outcome: **{report.outcome.value.replace('_', ' ')}**  ",
         f"Report v{report.version_no} · {report.status.value} · provider {report.provider}/{report.model} · prompt {report.prompt_version} · schema {report.schema_version} · engine {report.engine_version}",
         "",
-        "> Fictional demonstration data. BearCase does not provide financial, legal, tax, or investment advice.",
+        "> "
+        + ("Fictional demonstration data. " if is_demo else "")
+        + "BearCase does not provide financial, legal, tax, or investment advice.",
         "",
     ]
     for s in report.sections:
         lines.append(f"## {s['title']}")
         lines.append("")
         for st in s.get("statements", []):
+            if st.get("role") == "intro":  # plain-language lead sentence, not a cited bullet
+                lines.append(f"{st['text']}")
+                lines.append("")
+                continue
             lines.append(f"- {st['text']}{_cite(st)}")
         table = s.get("table") or {}
         if table.get("rows"):
@@ -46,7 +52,7 @@ def to_markdown(report: Report, company: str) -> str:
     return "\n".join(lines)
 
 
-def to_pdf(report: Report, company: str) -> bytes:
+def to_pdf(report: Report, company: str, is_demo: bool = True) -> bytes:
     ss = getSampleStyleSheet()
     h1 = ParagraphStyle("h1", parent=ss["Title"], fontSize=18, leading=22)
     h2 = ParagraphStyle("h2", parent=ss["Heading2"], fontSize=12.5, leading=15, spaceBefore=10)
@@ -59,12 +65,19 @@ def to_pdf(report: Report, company: str) -> bytes:
             f"Provider {report.provider}/{report.model} · prompt {report.prompt_version} · schema {report.schema_version} · engine {report.engine_version}",
             small,
         ),
-        Paragraph("Fictional demonstration data. BearCase does not provide financial, legal, tax, or investment advice.", small),
+        Paragraph(
+            ("Fictional demonstration data. " if is_demo else "")
+            + "BearCase does not provide financial, legal, tax, or investment advice.",
+            small,
+        ),
         Spacer(1, 8),
     ]
     for s in report.sections:
         story.append(Paragraph(s["title"], h2))
         for st in s.get("statements", []):
+            if st.get("role") == "intro":
+                story.append(Paragraph(st["text"], body))
+                continue
             story.append(Paragraph(f"• {st['text']}<font size=7 color='#666666'>{_cite(st)}</font>", body))
         table = s.get("table") or {}
         if table.get("rows"):

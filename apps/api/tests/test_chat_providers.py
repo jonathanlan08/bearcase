@@ -485,6 +485,8 @@ def test_describe_error_maps_provider_failures_and_redacts_keys() -> None:
     assert "rate limit" in chat_service.describe_error(limited, backend)
     missing = openai.NotFoundError("model not found", response=httpx.Response(404, request=req), body=None)
     assert "gemini-3.8-flash" in chat_service.describe_error(missing, backend)
+    busy = openai.InternalServerError("high demand", response=httpx.Response(503, request=req), body=None)
+    assert "temporarily unavailable" in chat_service.describe_error(busy, backend)
     conn = openai.APIConnectionError(request=req)
     assert "Could not reach Google Gemini" in chat_service.describe_error(conn, backend)
     leaked = RuntimeError("upstream said not-a-real-key-zz9 is wrong")
@@ -662,7 +664,8 @@ def test_tool_call_or_resolved_marker_makes_scope_deal(client, demo, db, monkeyp
     events = _stream_once(client, demo, monkeypatch, script, "What are the biggest risks?")
     citations = next(d for e, d in events if e == "citations")
     done = events[-1][1]
-    assert citations["scope"] == "deal" and done["scope"] == "deal" and done["grounded"] is True and done["error"] is None
+    # deal scope, but not grounded: a reply that read the deal room and cites nothing gives the reader nothing to open
+    assert citations["scope"] == "deal" and done["scope"] == "deal" and done["grounded"] is False and done["error"] is None
     row = db.get(ChatMessage, uuid.UUID(events[0][1]["message_id"]))
     assert row is not None and row.citations["scope"] == "deal" and [t["name"] for t in row.tool_calls] == ["get_findings"]
     # a marker resolved (an id remembered from earlier in the thread), even though no tool ran this turn
@@ -926,8 +929,8 @@ def test_disconnect_mid_stream_persists_a_stopped_reply(db, demo) -> None:  # ty
     row = db.get(ChatMessage, uuid.UUID(meta[1]["message_id"]))
     assert row is not None and row.error == "Stopped before the reply finished." and row.content == ""
     assert row.citations["evidence"] == [] and row.citations["metrics"] == [] and row.citations["scope"] == "deal"
-    assert (
-        row.citations["unresolved"] == 0 and row.grounded is True and [t["name"] for t in row.tool_calls] == ["get_adjustments"]
+    assert (  # a tool ran and nothing was cited, so the stopped reply is not grounded
+        row.citations["unresolved"] == 0 and row.grounded is False and [t["name"] for t in row.tool_calls] == ["get_adjustments"]
     )
     audit = db.scalar(select(AuditEvent).where(AuditEvent.object_id == row.id, AuditEvent.event_type == "chat.reply"))
     assert audit is not None and audit.payload["error"] == "Stopped before the reply finished."

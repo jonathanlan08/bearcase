@@ -90,3 +90,62 @@ def period_metrics(periods: dict[str, dict[str, Decimal | None]]) -> list[Period
 def ebitda_margin(ebitda: Decimal | None, revenue: Decimal | None) -> Calc:
     c = f.operating_margin(ebitda, revenue)
     return Calc("ebitda_margin", c.value, c.unit, "EBITDA / revenue", {"ebitda": ebitda, "revenue": revenue}, c.missing, c.notes)
+
+
+# ---------- reader-facing number formatting -------------------------------------------------
+# One formatter for every number that reaches a reader (finding text, report prose, table cells).
+# Decimal repr such as "3.00000000" or "0E-8" must never appear in prose; callers pass the unit
+# and get a string with separators, one decimal for percentages, two for multiples, none for money.
+
+Number = Decimal | int | float | str
+
+
+def _dec(v: Number) -> Decimal:
+    return v if isinstance(v, Decimal) else Decimal(str(v))
+
+
+def format_money(v: Number | None) -> str:
+    """$1,810,000 (no decimals, thousands separators, sign before the symbol)."""
+    if v is None:
+        return "n/a"
+    d = _dec(v)
+    body = f"${abs(d):,.0f}"
+    return f"-{body}" if d < 0 and body != "$0" else body
+
+
+def format_pct(v: Number | None) -> str:
+    """11.6% (one decimal)."""
+    return "n/a" if v is None else f"{_dec(v):.1f}%"
+
+
+def format_multiple(v: Number | None) -> str:
+    """1.34x (two decimals)."""
+    return "n/a" if v is None else f"{_dec(v):.2f}x"
+
+
+def format_plain(v: Number | None) -> str:
+    """Integers with separators; otherwise up to two decimals with trailing zeros trimmed."""
+    if v is None:
+        return "n/a"
+    d = _dec(v)
+    if d == d.to_integral_value():
+        return f"{int(d):,}"
+    return f"{d:,.2f}".rstrip("0").rstrip(".")
+
+
+def format_value(v: Number | None, unit: str | None) -> str:
+    """Format by unit: usd, pct, multiple, years, months, count, text."""
+    if v is None:
+        return "n/a"
+    u = (unit or "").lower()
+    if u == "usd":
+        return format_money(v)
+    if u == "pct":
+        return format_pct(v)
+    if u == "multiple":
+        return format_multiple(v)
+    if u in ("years", "months"):
+        n = format_plain(v)
+        singular = u[:-1]
+        return f"{n} {singular if n == '1' else u}"
+    return format_plain(v)

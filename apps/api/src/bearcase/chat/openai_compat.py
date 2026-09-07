@@ -17,7 +17,7 @@ import openai
 from sqlalchemy.orm import Session
 
 from bearcase.chat.providers import ChatBackend
-from bearcase.chat.service import MAX_TOOL_ROUNDS, SYSTEM, ModelStoppedError, sse
+from bearcase.chat.service import MAX_TOOL_ROUNDS, ModelStoppedError, sse, system_prompt
 from bearcase.chat.tools import TOOL_LABELS, TOOLS, run_tool
 from bearcase.config import get_settings
 from bearcase.models import Deal
@@ -173,7 +173,7 @@ def openai_compat_loop(
     usage: dict[str, Any],
 ) -> Iterator[str]:
     client = make_client(backend)
-    system = SYSTEM.format(company=deal.company_name)
+    system = system_prompt(deal)
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}, *history]
     tools = openai_tools()
     extra = _stream_extra(backend)

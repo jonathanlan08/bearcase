@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { SiteNav, SiteFooter } from "@/components/landing/chrome";
 
-export const metadata: Metadata = { title: "Methodology" };
+export const metadata: Metadata = { title: "How we check claims", description: "How BearCase checks a seller's claims: status rules, what the model does and what code does, the formula contract, what a citation means, and the limits." };
 
 const FORMULAS: Array<[string, string, string]> = [
   ["Revenue growth", "(current − prior) / prior", "None if prior is missing or zero"],
@@ -22,52 +22,64 @@ const FORMULAS: Array<[string, string, string]> = [
   ["Recurring revenue share", "contract-supported recurring revenue ÷ total revenue", "Only rows typed as maintenance agreements count"],
 ];
 
+const STATUSES: Array<[string, string]> = [
+  ["Supported", "At least one citation that resolves directly confirms the claim, or the deterministic engine reproduces the number within tolerance."],
+  ["Contradicted", "At least one citation that resolves directly conflicts with the claim, or the engine's value differs beyond tolerance (1.0 point for percentages, 2% for currency)."],
+  ["Unsupported", "No provided evidence addresses the claim. Absence of evidence is never treated as contradiction."],
+  ["Review required", "Evidence is partial, mixed, or low-confidence; a calculated input needs a human check; or a reviewer rejected the AI finding."],
+];
+
 export default function MethodologyPage() {
   return (
     <div data-world="ink" className="min-h-svh bg-bg text-fg">
       <SiteNav />
       <main id="main" className="mx-auto max-w-3xl px-6 pb-24 pt-32">
-        <h1 className="text-[44px] leading-[1.05] md:text-[56px]">How BearCase decides what is true.</h1>
-        <p className="mt-6 text-lg text-fg-muted">Two systems share the work. A language model reads and compares; deterministic code counts. Neither is allowed to do the other&apos;s job.</p>
+        <h1 className="text-[44px] leading-[1.05] md:text-[56px]">How we check claims.</h1>
+        <p className="mt-6 text-lg text-fg-muted">Two systems share the work. A language model reads and compares; deterministic code counts. Neither is allowed to do the other&apos;s job, and a person makes the final call on every claim.</p>
 
         <h2 className="mt-16 text-3xl">Claim statuses</h2>
         <dl className="mt-6 grid gap-4 sm:grid-cols-2">
-          {[["Supported", "At least one resolvable citation directly confirms the claim, or the deterministic engine reproduces the number within tolerance."], ["Contradicted", "At least one resolvable citation directly conflicts, or the engine's value differs beyond tolerance (1.0 point for percentages, 2% for currency)."], ["Unsupported", "No provided evidence addresses the claim. Absence of evidence is never treated as contradiction."], ["Review required", "Evidence is partial, mixed, or low-confidence; a calculated input needs a human check; or a reviewer rejected the AI finding."]].map(([t, d]) => (
+          {STATUSES.map(([t, d]) => (
             <div key={t} className="rounded-[var(--radius-3)] border border-hairline p-4"><dt className="font-medium">{t}</dt><dd className="mt-1 text-sm text-fg-muted">{d}</dd></div>
           ))}
         </dl>
-        <p className="mt-4 text-sm text-fg-muted">Guardrails apply in code regardless of provider: Supported requires a supporting citation, Contradicted requires a contradicting one, uncited output degrades to Unsupported, and low confidence routes to review.</p>
+        <p className="mt-4 text-sm text-fg-muted">Guardrails apply in code regardless of provider: Supported requires a supporting citation, Contradicted requires a contradicting one, uncited output degrades to Unsupported, and low confidence routes to review. A status describes the state of the evidence, not a verdict on the deal.</p>
 
         <h2 className="mt-16 text-3xl">What the model does, what code does</h2>
         <div className="mt-6 grid gap-6 sm:grid-cols-2 text-sm">
-          <div><p className="mb-2 text-sm font-semibold">The model (Claude, or the rule-based mock)</p><ul className="list-disc space-y-1 pl-5 text-fg-muted"><li>Classify documents</li><li>Extract material claims with a source chunk</li><li>Rank and compare retrieved evidence</li><li>Draft questions, conditions, and narrative</li><li>Explain persisted calculation outputs</li></ul></div>
+          <div><p className="mb-2 text-sm font-semibold">The model (a live provider, or the rule-based mock)</p><ul className="list-disc space-y-1 pl-5 text-fg-muted"><li>Classify documents</li><li>Extract material claims with a source chunk</li><li>Rank and compare retrieved evidence</li><li>Draft questions, conditions, and narrative</li><li>Explain persisted calculation outputs</li></ul></div>
           <div><p className="mb-2 text-sm font-semibold">Deterministic code</p><ul className="list-disc space-y-1 pl-5 text-fg-muted"><li>Validate and hash uploads; never execute content</li><li>Map statements with cell provenance</li><li>Every financial formula below</li><li>Scenario projections and immutable snapshots</li><li>Citation existence and report validation</li><li>Authorization, state machines, audit history</li></ul></div>
         </div>
 
         <h2 className="mt-16 text-3xl">Formula contract</h2>
         <div className="mt-6 scroll-x rounded-[var(--radius-2)] border border-hairline">
           <table className="w-full text-sm">
-            <thead><tr className="border-b border-hairline text-left text-xs text-fg-muted"><th className="p-3">Metric</th><th className="p-3">Formula</th><th className="p-3">Missing data and edge cases</th></tr></thead>
+            <caption className="sr-only">Every financial formula the engine computes, with how missing data is handled</caption>
+            <thead><tr className="border-b border-hairline text-left text-xs text-fg-muted"><th scope="col" className="p-3">Metric</th><th scope="col" className="p-3">Formula</th><th scope="col" className="p-3">Missing data and edge cases</th></tr></thead>
             <tbody>{FORMULAS.map(([m, fm, n]) => <tr key={m} className="border-b border-hairline last:border-b-0"><td className="p-3 font-medium">{m}</td><td className="p-3 font-mono text-xs">{fm}</td><td className="p-3 text-fg-muted">{n}</td></tr>)}</tbody>
           </table>
         </div>
         <p className="mt-3 text-sm text-fg-muted">All arithmetic is Decimal. A missing input yields no value and a named reason; nothing is defaulted silently. Every persisted metric stores its formula and input snapshot.</p>
 
-        <h2 className="mt-16 text-3xl">Citations and trust</h2>
+        <h2 className="mt-16 text-3xl">What a citation means</h2>
+        <p className="mt-6 text-fg-muted">A citation that resolves shows where a statement came from: a page and paragraph, a sheet and row, or a CSV row in a specific version of a document. It does not show that the statement is true, and it does not show that the cited passage supports every word around it. The checks that carry the judgement are the status rules above, the recomputed numbers, and a reviewer who opens the source and reads it. A citation is the shortest path to that source, not a substitute for reading it.</p>
         <ul className="mt-6 list-disc space-y-2 pl-5 text-fg-muted">
           <li>Every evidence chunk records document, version, page and paragraph, sheet and row, or CSV row. Citations resolve or the claim is dropped.</li>
           <li>Uploaded documents are untrusted. Instruction-like text inside them is stored as inert content, labeled, and surfaced as a finding. It never changes system behavior.</li>
           <li>Provider output must validate against a versioned schema before anything is persisted. Prompt, schema, model, and run id are stored with every extraction.</li>
           <li>Original AI output is immutable. Reviewer decisions are additive and audited; the report shows both.</li>
           <li>A report fails validation if any material statement lacks a resolvable citation or a named derivation.</li>
+          <li>The deal chat answers deal questions only through read-only tools over stored rows; every figure it states carries a citation marker that code validates before the reply is saved.</li>
         </ul>
 
         <h2 className="mt-16 text-3xl">Limitations</h2>
         <ul className="mt-6 list-disc space-y-2 pl-5 text-fg-muted">
           <li>Portfolio prototype with synthetic data. Not diligence software, and not financial, legal, tax, or investment advice.</li>
           <li>Extraction can be incomplete or wrong; every status is meant to be reviewed by a person.</li>
+          <li>Deterministic arithmetic does not make its inputs verified. The add-back rules test an adjustment against the statement lines (for example, an owner-compensation normalization smaller than the recorded salary is accepted); they do not establish a market salary or a settlement&apos;s true cost. Every accepted add-back still deserves a reviewer&apos;s eye.</li>
           <li>Financial outputs depend on mapped and reviewed inputs. Interest-only and balloon debt structures are not modeled.</li>
-          <li>A real deployment would need stronger identity, retention, encryption, monitoring, and vendor-risk controls.</li>
+          <li>The evaluation suite scores the curated Northstar fixtures with the rule-based provider. Passing it shows the pipeline is consistent, not that extraction is accurate on unfamiliar documents.</li>
+          <li>A real deployment would need stronger identity, retention, encryption, monitoring, rate limits, and vendor-risk controls.</li>
         </ul>
       </main>
       <SiteFooter />

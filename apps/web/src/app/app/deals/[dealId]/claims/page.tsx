@@ -2,20 +2,33 @@
 
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Check, X, Pencil, ExternalLink, Undo2 } from "lucide-react";
-import { useClaim, useClaims } from "@/components/app/hooks";
+import { ArrowLeft, Check, X, Pencil, ExternalLink, Undo2, MessageSquareText } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { qk, useClaim, useClaims } from "@/components/app/hooks";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, Kbd, Skeleton } from "@/components/ui/primitives";
 import { ConfidenceMeter, StatusChip, StatusGlyph, STATUS_LABEL } from "@/components/domain/status";
 import { CitationChip } from "@/components/domain/citation";
 import { DocumentViewer, type ViewerTarget } from "@/components/domain/document-viewer";
-import { CorrectionDialog, useReview } from "@/components/domain/review-dialog";
-import { fmtValue, fmtDate, titleCase } from "@/lib/format";
+import { ACTION_VERB, CorrectionDialog, useReview } from "@/components/domain/review-dialog";
+import { fmtValue, fmtDateTime, titleCase } from "@/lib/format";
 import { useMediaQuery } from "@/lib/hooks";
-import type { Claim, ClaimDetail, Link as EvLink } from "@/lib/api";
+import { askTheDeal } from "@/lib/chat-bus";
+import { api, type Claim, type ClaimDetail, type Link as EvLink } from "@/lib/api";
 
 const STATUSES = ["supported", "contradicted", "review_required", "unsupported"] as const;
+
+/** One plain sentence per status so a first-time buyer knows what confirming it means. */
+const STATUS_MEANING: Record<string, string> = {
+  supported: "the evidence backs the seller's claim",
+  contradicted: "the documents disagree with the seller's claim",
+  unsupported: "no evidence was found either way",
+  review_required: "the evidence is mixed or the extractor was unsure",
+  pending: "the claim has not been checked yet",
+};
+
+type DialogMode = "correct" | "reject" | null;
 
 export default function ClaimsPage() {
   const { dealId } = useParams<{ dealId: string }>();
@@ -28,7 +41,7 @@ export default function ClaimsPage() {
   const [q, setQ] = useState("");
   const [chosen, setSelected] = useState<string | null>(search.get("claim"));
   const [viewer, setViewer] = useState<ViewerTarget | null>(null);
-  const [correcting, setCorrecting] = useState(false);
+  const [dialog, setDialog] = useState<DialogMode>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const review = useReview(dealId);
 
@@ -44,27 +57,37 @@ export default function ClaimsPage() {
   const move = useCallback((delta: number) => { const i = list.findIndex((c) => c.id === selected); const next = list[Math.max(0, Math.min(list.length - 1, i + delta))]; if (next) { setSelected(next.id); (listRef.current?.querySelector(`[data-id="${next.id}"]`) as HTMLElement | null)?.focus(); } }, [list, selected]);
   const jumpToSource = useCallback((d: ClaimDetail | undefined) => { if (d?.source_evidence) setViewer({ documentId: d.source_evidence.document_id, documentName: d.source_evidence.document_name, evidenceId: d.source_evidence.id, locator: d.source_evidence.locator, highlightIds: d.links.map((l) => l.evidence.id) }); }, []);
   const decide = useCallback((action: "accept" | "undo") => { if (selected) review.mutate({ claimId: selected, body: { action } }); }, [review, selected]);
+  const qc = useQueryClient();
+  // The shortcut reads through the query cache, so it works even when the detail for a freshly selected claim has not rendered yet.
+  const jumpToSelected = useCallback(() => {
+    if (!selected) return;
+    qc.fetchQuery({ queryKey: qk.claim(dealId, selected), queryFn: () => api.get<ClaimDetail>(`/api/deals/${dealId}/claims/${selected}`), staleTime: 30_000 }).then(jumpToSource).catch(() => undefined);
+  }, [qc, dealId, selected, jumpToSource]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable || viewer || correcting) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable || viewer || dialog) return;
+      if (t.closest?.('[role="dialog"]')) return; // the chat panel or any other modal owns the keyboard while open
       if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); move(1); }
       else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); move(-1); }
       else if (e.key === "a") decide("accept");
-      else if (e.key === "r" || e.key === "c") setCorrecting(true);
-      else if (e.key === "e") jumpToSource(detail.data);
+      else if (e.key === "c") setDialog("correct");
+      else if (e.key === "r") setDialog("reject");
+      else if (e.key === "e") jumpToSelected();
       else if (e.key === "u") decide("undo");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [move, decide, jumpToSource, detail.data, viewer, correcting]);
+  }, [move, decide, jumpToSelected, viewer, dialog]);
 
   const d = detail.data;
   const current = d?.decisions.find((x) => x.is_current);
   return (
     <div className="flex min-h-[calc(100svh-0px)] flex-col">
       <PageHeader kicker={kicker} title="Claim Audit">
+        <p className="mt-2 max-w-3xl text-sm text-fg-muted">Every sentence the seller’s documents present as a fact, checked against the other documents. Open a claim, read the evidence, then record what you decide.</p>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <div className="flex flex-wrap gap-1" role="group" aria-label="Filter by status">
             <FilterChip active={status === "all"} onClick={() => setStatus("all")}>All <span className="num">{claims.data?.length ?? 0}</span></FilterChip>
@@ -72,7 +95,7 @@ export default function ClaimsPage() {
           </div>
           <select aria-label="Filter by claim type" className="h-8 rounded-[var(--radius-1)] border border-hairline bg-bg-raised px-2 text-sm" value={type} onChange={(e) => setType(e.target.value)}><option value="all">All types</option>{types.map((t) => <option key={t} value={t}>{titleCase(t)}</option>)}</select>
           <input aria-label="Search claims" placeholder="Search claim text" className="h-8 w-52 rounded-[var(--radius-1)] border border-hairline bg-bg-raised px-2 text-sm" value={q} onChange={(e) => setQ(e.target.value)} />
-          <p className="ml-auto hidden items-center gap-1.5 text-xs text-fg-muted lg:flex"><Kbd>J</Kbd><Kbd>K</Kbd> move <Kbd>A</Kbd> accept <Kbd>C</Kbd> correct <Kbd>R</Kbd> reject <Kbd>E</Kbd> evidence <Kbd>U</Kbd> undo</p>
+          <p className="ml-auto hidden items-center gap-1.5 text-xs text-fg-muted lg:flex"><Kbd>J</Kbd><Kbd>K</Kbd> move <Kbd>A</Kbd> confirm <Kbd>C</Kbd> correct <Kbd>R</Kbd> reject <Kbd>E</Kbd> evidence <Kbd>U</Kbd> undo</p>
         </div>
       </PageHeader>
       <div className="grid flex-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
@@ -96,12 +119,13 @@ export default function ClaimsPage() {
                   <ConfidenceMeter value={d.confidence} />
                   {d.extraction_run && <span className="font-mono text-[11px] text-fg-muted">{String(d.extraction_run.provider)}/{String(d.extraction_run.model)} · prompt {String(d.extraction_run.prompt_version)} · schema {String(d.extraction_run.schema_version)}</span>}
                 </div>
+                <p className="mt-2 text-xs text-fg-muted">Confidence is how confident the extractor was that this sentence is a claim. It is not a measure of whether the claim is true; the status below is.</p>
               </div>
               <div className="grid grid-cols-2 gap-3 rounded-[var(--radius-3)] border border-hairline p-3 md:grid-cols-4">
-                <Stat label="Claimed" value={d.claimed_value !== null ? fmtValue(d.claimed_value, d.claimed_unit) : "—"} />
-                <Stat label="Verified" value={d.verified_value !== null ? fmtValue(d.verified_value, d.verified_unit ?? d.claimed_unit) : "—"} tone={d.status === "contradicted" ? "text-red" : d.status === "supported" ? "text-accent" : ""} />
+                <Stat label="Seller says" value={d.claimed_value !== null ? fmtValue(d.claimed_value, d.claimed_unit) : "—"} />
+                <Stat label="Documents show" value={d.verified_value !== null ? fmtValue(d.verified_value, d.verified_unit ?? d.claimed_unit) : "—"} tone={d.status === "contradicted" ? "text-red" : d.status === "supported" ? "text-accent" : ""} />
                 <Stat label="Difference" value={d.claimed_value !== null && d.verified_value !== null ? delta(d) : "—"} />
-                <Stat label="Rule" value={d.status_rule ? d.status_rule.replace(/_/g, " ") : "—"} mono />
+                <Stat label="Rule applied" value={d.status_rule ? d.status_rule.replace(/_/g, " ") : "—"} mono />
               </div>
               <section>
                 <h2 className="text-sm font-semibold">How this status was decided</h2>
@@ -109,6 +133,7 @@ export default function ClaimsPage() {
                 {d.verified_metric && (
                   <details className="mt-2 rounded-[var(--radius-2)] border border-hairline p-3 text-sm">
                     <summary className="cursor-pointer text-sm font-medium">Calculation: {d.verified_metric.label}</summary>
+                    <p className="mt-2 text-xs text-fg-muted">Computed by the deterministic engine from the mapped statements, never by the model.</p>
                     <p className="mt-2 font-mono text-xs">{d.verified_metric.formula ?? "extracted value"}</p>
                     <pre className="mt-2 overflow-x-auto rounded-[var(--radius-1)] bg-bg-muted p-2 font-mono text-[11px]">{JSON.stringify(d.verified_metric.input_snapshot, null, 1)}</pre>
                   </details>
@@ -118,18 +143,22 @@ export default function ClaimsPage() {
               <EvidenceGroup title="Contradicting evidence" role="contradicting" links={d.links} onOpen={(l) => setViewer({ documentId: l.evidence.document_id, documentName: l.evidence.document_name, evidenceId: l.evidence.id, locator: l.evidence.locator, highlightIds: d.links.map((x) => x.evidence.id) })} />
               <section className="rounded-[var(--radius-3)] border border-hairline p-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="text-sm font-medium">Review</h2>
+                  <h2 className="text-sm font-medium">Your review</h2>
                   <div className="ml-auto flex flex-wrap gap-2">
-                    <Button size="sm" variant="secondary" icon={<Check size={14} />} onClick={() => decide("accept")} loading={review.isPending}>Accept</Button>
-                    <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setCorrecting(true)}>Correct…</Button>
-                    <Button size="sm" variant="danger" icon={<X size={14} />} onClick={() => setCorrecting(true)}>Reject…</Button>
+                    <Button size="sm" variant="secondary" icon={<Check size={14} />} onClick={() => decide("accept")} loading={review.isPending} disabled={current?.action === "accept"}>Confirm assessment</Button>
+                    <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setDialog("correct")}>Correct…</Button>
+                    <Button size="sm" variant="danger" icon={<X size={14} />} onClick={() => setDialog("reject")}>Reject…</Button>
                     {current && <Button size="sm" variant="ghost" icon={<Undo2 size={14} />} onClick={() => decide("undo")}>Undo</Button>}
-                    <Button size="sm" variant="ghost" icon={<ExternalLink size={14} />} onClick={() => jumpToSource(d)}>Jump to source</Button>
                   </div>
                 </div>
+                <p className="mt-2 text-xs text-fg-muted">Confirm records that you agree with the AI&apos;s assessment, <span className="font-medium text-fg">{STATUS_LABEL[d.status]}</span> ({STATUS_MEANING[d.status] ?? "see the rationale above"}). Correct or reject when you disagree; each adds an entry under your name and the original AI output stays unchanged.</p>
+                <div className="mt-3 flex flex-wrap gap-2 border-t border-hairline pt-3">
+                  <Button size="sm" variant="ghost" icon={<ExternalLink size={14} />} onClick={() => jumpToSource(d)} disabled={!d.source_evidence}>Jump to source</Button>
+                  <Button size="sm" variant="ghost" icon={<MessageSquareText size={14} />} onClick={() => askTheDeal(askPrompt(d))}>Ask about this claim</Button>
+                </div>
                 {d.decisions.length > 0 && (
-                  <ol className="mt-3 flex flex-col gap-1.5 border-t border-hairline pt-3 text-sm">
-                    {d.decisions.map((x) => <li key={x.id} className={x.is_current ? "" : "text-fg-muted line-through"}><span className="font-medium">{x.user_name}</span> {x.action}{x.resulting_status ? ` → ${STATUS_LABEL[x.resulting_status] ?? x.resulting_status}` : ""}{x.corrected_value ? ` · ${fmtValue(x.corrected_value, x.corrected_unit)}` : ""}{x.note ? ` — ${x.note}` : ""} <span className="num text-xs text-fg-muted">{fmtDate(x.created_at)}</span></li>)}
+                  <ol className="mt-3 flex flex-col gap-1.5 border-t border-hairline pt-3 text-sm" aria-label="Decision history">
+                    {d.decisions.map((x) => <li key={x.id} className={x.is_current ? "" : "text-fg-muted line-through"}><span className="font-medium">{x.user_name}</span> {ACTION_VERB[x.action] ?? x.action}{x.resulting_status ? ` → ${STATUS_LABEL[x.resulting_status] ?? x.resulting_status}` : ""}{x.corrected_value ? ` · ${fmtValue(x.corrected_value, x.corrected_unit)}` : ""}{x.note ? ` — ${x.note}` : ""} <span className="num text-xs text-fg-muted">{fmtDateTime(x.created_at)}</span></li>)}
                   </ol>
                 )}
                 <p className="mt-3 text-xs text-fg-muted">Original extraction (immutable): status <span className="font-medium">{STATUS_LABEL[d.status]}</span>, claimed {d.claimed_value !== null ? fmtValue(d.claimed_value, d.claimed_unit) : "text"}.</p>
@@ -140,9 +169,15 @@ export default function ClaimsPage() {
         </div>
       </div>
       <DocumentViewer dealId={dealId} target={viewer} onClose={() => setViewer(null)} />
-      <CorrectionDialog open={correcting} onOpenChange={setCorrecting} claim={d ?? null} pending={review.isPending} onSubmit={(body) => { if (selected) review.mutate({ claimId: selected, body }, { onSuccess: () => setCorrecting(false) }); }} />
+      <CorrectionDialog key={dialog ?? "closed"} open={!!dialog} defaultMode={dialog ?? "correct"} onOpenChange={(o) => { if (!o) setDialog(null); }} claim={d ?? null} pending={review.isPending} onSubmit={(body) => { if (selected) review.mutate({ claimId: selected, body }, { onSuccess: () => setDialog(null) }); }} />
     </div>
   );
+}
+
+/** The prompt handed to "Ask the deal": the claim text, its status, and both numbers, so the user never retypes context. */
+function askPrompt(d: ClaimDetail): string {
+  const numbers = d.claimed_value !== null ? ` Seller says ${fmtValue(d.claimed_value, d.claimed_unit)}${d.verified_value !== null ? `; the documents show ${fmtValue(d.verified_value, d.verified_unit ?? d.claimed_unit)}` : ""}.` : "";
+  return `Explain this claim and the evidence behind it, then suggest what I should ask the seller.\nClaim: "${d.claim_text}"\nStatus: ${STATUS_LABEL[d.effective_status]}.${numbers}`;
 }
 
 function delta(d: ClaimDetail): string {

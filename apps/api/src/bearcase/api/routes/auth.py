@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 
 from bearcase.api.deps import DbDep, UserDep
+from bearcase.api.ratelimit import rate_limited
 from bearcase.api.schemas import LoginRequest, RegisterRequest, UserOut
 from bearcase.audit import record
 from bearcase.auth import SESSION_COOKIE, create_session, hash_password, revoke_session, verify_password
@@ -26,7 +27,7 @@ def set_cookie(response: Response, token: str) -> None:
     )
 
 
-@router.post("/register", response_model=UserOut, status_code=201)
+@router.post("/register", response_model=UserOut, status_code=201, dependencies=[Depends(rate_limited)])
 def register(body: RegisterRequest, db: DbDep, response: Response) -> User:
     if db.scalar(select(User).where(User.email == body.email.lower())):
         raise HTTPException(status.HTTP_409_CONFLICT, "An account with that email already exists.")
@@ -47,7 +48,7 @@ def register(body: RegisterRequest, db: DbDep, response: Response) -> User:
     return user
 
 
-@router.post("/login", response_model=UserOut)
+@router.post("/login", response_model=UserOut, dependencies=[Depends(rate_limited)])
 def login(body: LoginRequest, db: DbDep, response: Response) -> User:
     user = db.scalar(select(User).where(User.email == body.email.lower()))
     if user is None or not verify_password(body.password, user.password_hash):

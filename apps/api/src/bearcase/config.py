@@ -8,7 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -71,10 +71,49 @@ class Settings(BaseSettings):
     max_sheet_rows: int = 20_000
     max_csv_rows: int = 50_000
 
+    # Storage quotas, enforced by the upload route. Documents cannot be deleted through the API yet, so a
+    # full deal or a full allowance stays full until an operator intervenes.
+    max_documents_per_deal: int = Field(default=50, ge=1, description="Files one deal may hold.")
+    max_storage_bytes_per_user: int = Field(
+        default=500 * 1024 * 1024, ge=1, description="Stored bytes across all of a user's deals, every version counted."
+    )
+
+    # Abuse limits. The token bucket lives in this process; a public deployment also needs limits at the
+    # ingress (request body size, connections) and one shared limiter when several API processes run.
+    rate_limit_enabled: bool = Field(default=True, description="Forced off under BEARCASE_ENV=test unless set explicitly.")
+    rate_limit_per_minute: int = Field(
+        default=60,
+        ge=1,
+        description="Requests per minute, per signed-in user (or client address before sign-in), for the routes that "
+        "parse, analyse, seed, or call a model. See api/ratelimit.py for the list.",
+    )
+    trust_proxy_headers: bool = Field(
+        default=False,
+        description="Read the client address from X-Forwarded-For. Only enable behind a proxy that overwrites the header.",
+    )
+
     cors_origins: list[str] = ["http://localhost:3000"]
     session_ttl_hours: int = 24 * 14
-    demo_email: str = "analyst@bearcase.demo"
+    demo_email: str = Field(
+        default="analyst@bearcase.demo",
+        description="Address of the legacy shared demo identity, still used by `bearcase seed` and the eval runner. "
+        "Visitors never sign in as it: /api/demo/session gives each visitor a private demo identity.",
+    )
+    demo_retention_days: int = Field(
+        default=14,
+        ge=1,
+        description="A visitor's demo identity, its deals, and its files are deleted this many days after the visitor's "
+        "newest session expired. Cleanup runs lazily, a few users at a time, when a demo starts.",
+    )
     fixtures_dir: Path = REPO_ROOT / "fixtures" / "northstar-hvac"
+
+    @model_validator(mode="after")
+    def _quiet_limiter_in_tests(self) -> Settings:
+        # The test suite shares one client address and would exhaust any budget. A test that exercises the
+        # limiter constructs Settings with rate_limit_enabled=True (or sets BEARCASE_RATE_LIMIT_ENABLED).
+        if self.env == "test" and "rate_limit_enabled" not in self.model_fields_set:
+            self.rate_limit_enabled = False
+        return self
 
     @property
     def is_sqlite(self) -> bool:

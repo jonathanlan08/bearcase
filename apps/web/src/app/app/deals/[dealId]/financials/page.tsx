@@ -3,25 +3,44 @@
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, type Financials, type Metric } from "@/lib/api";
+import { MessageSquareText } from "lucide-react";
+import { api, type Adjustment, type Financials, type Metric } from "@/lib/api";
 import { useFinancials, qk } from "@/components/app/hooks";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, Panel, Skeleton } from "@/components/ui/primitives";
 import { Table, td, th } from "@/components/ui/table";
-import { StatusChip, StatusGlyph } from "@/components/domain/status";
+import { StatusChip, StatusGlyph, STATUS_LABEL } from "@/components/domain/status";
 import { CitationChip } from "@/components/domain/citation";
 import { AddbackWaterfall, DscrGauge } from "@/components/domain/charts";
 import { DocumentViewer, type ViewerTarget } from "@/components/domain/document-viewer";
 import { useEvidence } from "@/components/app/hooks";
-import { fmtMoney, fmtValue, titleCase } from "@/lib/format";
+import { fmtMoney, fmtPct, fmtValue, titleCase, toNumber } from "@/lib/format";
 import { useToast } from "@/components/ui/toast";
+import { askTheDeal } from "@/lib/chat-bus";
 import { Dialog } from "radix-ui";
 import { Field, inputClass } from "@/components/ui/field";
 
 const LINES: Array<[string, string, boolean]> = [["revenue", "Revenue", true], ["cost_of_goods_sold", "Cost of goods sold", false], ["gross_profit", "Gross profit", true], ["opex_owner_compensation", "Owner compensation", false], ["opex_salaries_wages", "Salaries and wages", false], ["opex_temporary_labor", "Temporary labor", false], ["opex_marketing", "Marketing and advertising", false], ["opex_legal_professional", "Legal and professional", false], ["opex_insurance", "Insurance", false], ["opex_rent_occupancy", "Rent and occupancy", false], ["opex_vehicle_fuel", "Vehicle and fuel", false], ["opex_software_it", "Software and IT", false], ["opex_other_ga", "Other G&A", false], ["operating_expenses", "Total operating expenses", true], ["ebitda", "EBITDA (stated)", true], ["depreciation", "Depreciation", false], ["amortization", "Amortization", false], ["operating_income", "Operating income", true], ["interest_expense", "Interest expense", false], ["income_before_tax", "Income before tax", false], ["income_tax_expense", "Income tax expense", false], ["net_income", "Net income", true]];
 const CALC: Array<[string, string, string]> = [["revenue_growth", "Revenue growth", "pct"], ["gross_margin", "Gross margin", "pct"], ["operating_margin", "Operating margin", "pct"], ["ebitda_reported", "Reported EBITDA (reconciled)", "usd"]];
-const DEAL: Array<[string, string]> = [["cagr", "Revenue CAGR"], ["ebitda_adjusted_seller", "Seller adjusted EBITDA"], ["ebitda_adjusted_verified", "Verified adjusted EBITDA"], ["enterprise_value", "Enterprise value"], ["ev_to_ebitda_seller", "EV / seller EBITDA"], ["ev_to_ebitda_verified", "EV / verified EBITDA"], ["debt_to_ebitda_seller", "Debt / seller EBITDA"], ["debt_to_ebitda_verified", "Debt / verified EBITDA"], ["annual_debt_service", "Annual debt service"], ["cfads_base", "CFADS (base, year 1)"], ["dscr_base", "DSCR (base, year 1)"], ["cash_on_cash_base", "Cash-on-cash (base, year 1)"], ["irr_base", "Equity IRR (base, 5-year)"], ["customer_concentration_top1", "Largest customer share"], ["recurring_revenue_pct", "Contract-supported recurring revenue"]];
+/** key, label, one-line meaning for a first-time buyer */
+const DEAL: Array<[string, string, string]> = [
+  ["cagr", "Revenue CAGR", "Average yearly revenue growth over the statement periods."],
+  ["ebitda_adjusted_seller", "Seller adjusted EBITDA", "Reported EBITDA plus every adjustment the seller asks you to accept."],
+  ["ebitda_adjusted_verified", "Verified adjusted EBITDA", "Reported EBITDA plus only the adjustments that passed review."],
+  ["enterprise_value", "Enterprise value", "The price for the whole business, debt included."],
+  ["ev_to_ebitda_seller", "EV / seller EBITDA", "Price paid per dollar of the seller's EBITDA."],
+  ["ev_to_ebitda_verified", "EV / verified EBITDA", "Price paid per dollar of verified EBITDA; higher means you pay more for the same earnings."],
+  ["debt_to_ebitda_seller", "Debt / seller EBITDA", "Years of the seller's EBITDA needed to repay the acquisition debt."],
+  ["debt_to_ebitda_verified", "Debt / verified EBITDA", "Years of verified EBITDA needed to repay the acquisition debt."],
+  ["annual_debt_service", "Annual debt service", "Interest plus principal due to the lender each year."],
+  ["cfads_base", "CFADS (base, year 1)", "Cash flow available for debt service: EBITDA after capex, cash taxes, and working capital."],
+  ["dscr_base", "DSCR (base, year 1)", "Cash available ÷ debt payments due. Below 1.00x the business cannot cover its loan."],
+  ["cash_on_cash_base", "Cash-on-cash (base, year 1)", "Year-1 cash to equity holders ÷ equity invested."],
+  ["irr_base", "Equity IRR (base, 5-year)", "Annualized return on the equity over five years, including the assumed exit."],
+  ["customer_concentration_top1", "Largest customer share", "Share of revenue from the single largest customer."],
+  ["recurring_revenue_pct", "Contract-supported recurring revenue", "Revenue backed by signed customer contracts."],
+];
 
 export default function FinancialsPage() {
   const { dealId } = useParams<{ dealId: string }>();
@@ -36,16 +55,15 @@ export default function FinancialsPage() {
   if (f.periods.length === 0) return <div><PageHeader kicker={kicker} title="Financial Verification" /><div className="p-6"><EmptyState title="No financial statements mapped" body="Upload an income statement workbook (XLSX) and run analysis. Line items are mapped to canonical keys with cell-level provenance." /></div></div>;
   return (
     <div>
-      <PageHeader kicker={kicker} title="Financial Verification" />
+      <PageHeader kicker={kicker} title="Financial Verification">
+        <p className="mt-2 max-w-3xl text-sm text-fg-muted">The seller’s adjusted EBITDA, rebuilt from the statements one adjustment at a time. Every number links to the cell or sentence it came from.</p>
+      </PageHeader>
       <div className="flex flex-col gap-6 p-4 md:p-6">
-        <StatementTable f={f} onCite={open} />
-        <div className="grid gap-4 lg:grid-cols-3">
-          {DEAL.map(([key, label]) => { const m = latest(f, key); return m ? <MetricCard key={key} m={m} label={label} onCite={open} /> : null; })}
-        </div>
-        <Panel title="Seller add-backs and verified adjusted EBITDA">
+        <WhatChanged f={f} dealId={dealId} onOpen={setViewer} onDecide={setDecide} />
+        <Panel title="Add-back bridge: from the seller's number to the verified number" id="bridge">
           <AddbackWaterfall steps={f.waterfall} sellerTotal={latest(f, "ebitda_adjusted_seller")?.value} />
-          <Table caption="Seller adjustments" className="mt-4">
-            <thead><tr><th className={th}>Adjustment</th><th className={`${th} text-right`}>Amount</th><th className={th}>Decision</th><th className={th}>Rationale</th><th className={th}>Evidence</th><th className={th}><span className="sr-only">Actions</span></th></tr></thead>
+          <Table caption="Seller adjustments and the decision on each" className="mt-4">
+            <thead><tr><th className={th}>Adjustment</th><th className={`${th} text-right`}>Amount</th><th className={th}>Decision</th><th className={th}>Why</th><th className={th}>Evidence</th><th className={th}><span className="sr-only">Actions</span></th></tr></thead>
             <tbody>
               {f.adjustments.map((a) => (
                 <tr key={a.id}>
@@ -54,16 +72,25 @@ export default function FinancialsPage() {
                   <td className={td}><StatusChip status={a.decision} />{a.decided_by_user_id && <p className="mt-1 text-[11px] font-medium text-accent">reviewer decision</p>}</td>
                   <td className={`${td} text-xs`}>{a.decision_rationale}<p className="mt-1 font-mono text-[10px] text-fg-muted">rule: {a.decision_rule}</p></td>
                   <td className={td}><span className="inline-flex flex-wrap gap-1">{a.evidence_ids.slice(0, 4).map((e) => <EvidenceCite key={e} dealId={dealId} id={e} onOpen={setViewer} />)}</span></td>
-                  <td className={td}><Button size="sm" variant="ghost" onClick={() => setDecide(a.id)}>Decide…</Button></td>
+                  <td className={`${td} whitespace-nowrap`}><Button size="sm" variant="ghost" onClick={() => setDecide(a.id)}>Decide…</Button><Button size="sm" variant="ghost" icon={<MessageSquareText size={14} />} onClick={() => askTheDeal(askAboutAdjustment(a))}>Ask</Button></td>
                 </tr>
               ))}
             </tbody>
           </Table>
+          <p className="mt-2 text-xs text-fg-muted">Accepted adjustments are added back to reported EBITDA. Rejected, unsupported, and review-required adjustments are excluded until a reviewer decides otherwise.</p>
         </Panel>
+        <section aria-labelledby="deal-metrics">
+          <h2 id="deal-metrics" className="text-sm font-medium">Deal metrics</h2>
+          <p className="mt-1 text-xs text-fg-muted">Computed by the deterministic engine from the mapped statements and the deal terms. Open “Formula and inputs” on any card to see exactly how.</p>
+          <div className="mt-3 grid gap-4 lg:grid-cols-3">
+            {DEAL.map(([key, label, hint]) => { const m = latest(f, key); return m ? <MetricCard key={key} m={m} label={label} hint={hint} onCite={open} /> : null; })}
+          </div>
+        </section>
         <div className="grid gap-4 md:grid-cols-2">
-          <Panel title="CFADS bridge (base case, year 1)"><CfadsBridge m={latest(f, "cfads_base")} /></Panel>
-          <Panel title="Debt service coverage"><DscrGauge value={latest(f, "dscr_base")?.value ?? null} threshold={String(latest(f, "covenant_dscr_threshold")?.value ?? "")} /><p className="mt-2 text-xs text-fg-muted">DSCR = CFADS ÷ annual debt service. EBITDA is never labeled CFADS; the bridge above shows every deduction.</p></Panel>
+          <Panel title="CFADS bridge (base case, year 1)"><p className="mb-2 text-xs text-fg-muted">CFADS is the cash actually available to pay the lender: EBITDA after maintenance capex, cash taxes, and working-capital investment.</p><CfadsBridge m={latest(f, "cfads_base")} /></Panel>
+          <Panel title="Debt service coverage"><DscrGauge value={latest(f, "dscr_base")?.value ?? null} threshold={String(latest(f, "covenant_dscr_threshold")?.value ?? "")} /><p className="mt-2 text-xs text-fg-muted">DSCR = CFADS ÷ annual debt service. EBITDA is never labeled CFADS; the bridge on the left shows every deduction.</p></Panel>
         </div>
+        <StatementTable f={f} onCite={open} />
       </div>
       <DocumentViewer dealId={dealId} target={viewer} onClose={() => setViewer(null)} />
       <DecisionDialog dealId={dealId} adjustmentId={decide} onClose={() => setDecide(null)} f={f} />
@@ -76,6 +103,57 @@ function latest(f: Financials, key: string): Metric | undefined {
   return rows[rows.length - 1];
 }
 
+function askAboutAdjustment(a: Adjustment): string {
+  return `Explain the seller's add-back "${a.label}" (${fmtMoney(a.amount)}, ${a.period_label}). The rule marked it ${STATUS_LABEL[a.decision] ?? a.decision}${a.decision_rationale ? ` because: ${a.decision_rationale}` : ""}. Should I accept it, and what should I ask the seller for?`;
+}
+
+/**
+ * The headline first: what the seller said, what survived review, and the reasons for every excluded adjustment.
+ * The subtraction is presentation only; both totals come from persisted engine metrics.
+ */
+function WhatChanged({ f, dealId, onOpen, onDecide }: { f: Financials; dealId: string; onOpen: (t: ViewerTarget) => void; onDecide: (id: string) => void }) {
+  const seller = latest(f, "ebitda_adjusted_seller");
+  const verified = latest(f, "ebitda_adjusted_verified");
+  const reported = latest(f, "ebitda_reported");
+  const s = toNumber(seller?.value), v = toNumber(verified?.value);
+  const diff = s !== null && v !== null ? v - s : null;
+  const pct = diff !== null && s ? (diff / s) * 100 : null;
+  const excluded = f.adjustments.filter((a) => a.decision !== "accepted");
+  const accepted = f.adjustments.length - excluded.length;
+  const tone = diff === null ? "" : diff < 0 ? "text-red" : diff > 0 ? "text-accent" : "";
+  return (
+    <Panel title="What changed and why" id="what-changed">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        <div>
+          <dl className="grid grid-cols-2 gap-3">
+            <div><dt className="text-xs text-fg-muted">Seller’s adjusted EBITDA</dt><dd className="num mt-1 text-2xl text-graphite">{seller ? fmtValue(seller.value, seller.unit) : "—"}</dd></div>
+            <div><dt className="text-xs text-fg-muted">Verified adjusted EBITDA</dt><dd className="num mt-1 text-2xl text-accent">{verified ? fmtValue(verified.value, verified.unit) : "—"}{verified?.requires_review && <StatusGlyph status="review_required" size={12} className="ml-2 inline align-middle" />}</dd></div>
+            <div><dt className="text-xs text-fg-muted">Difference</dt><dd className={`num mt-1 text-lg ${tone}`}>{diff === null ? "—" : `${diff >= 0 ? "+" : "−"}${fmtMoney(Math.abs(diff))}${pct !== null ? ` (${fmtPct(pct, 1, true)})` : ""}`}</dd></div>
+            <div><dt className="text-xs text-fg-muted">Reported EBITDA (statements)</dt><dd className="num mt-1 text-lg">{reported ? fmtValue(reported.value, reported.unit) : "—"}</dd></div>
+          </dl>
+          <p className="mt-3 text-sm text-fg-muted">{accepted} of {f.adjustments.length} seller adjustments were accepted{excluded.length ? `; ${excluded.length} ${excluded.length === 1 ? "was" : "were"} excluded for the reasons listed here` : ""}. Every decision can be overridden with a note, which recomputes the verified number.</p>
+        </div>
+        <div>
+          {excluded.length === 0 ? <p className="text-sm text-fg-muted">Every seller adjustment passed review, so the verified number equals the seller’s. The bridge below shows each step.</p> : (
+            <ol className="flex flex-col gap-2" aria-label="Excluded adjustments and reasons">
+              {excluded.map((a) => (
+                <li key={a.id} className="rounded-[var(--radius-2)] border border-hairline p-3 text-sm">
+                  <div className="flex flex-wrap items-center gap-2"><StatusGlyph status={a.decision} /><span className="font-medium">{a.label}</span><span className="num text-fg-muted">{fmtMoney(a.amount)}</span><span className="ml-auto text-xs text-fg-muted">{STATUS_LABEL[a.decision] ?? titleCase(a.decision)}{a.decided_by_user_id ? " · reviewer" : ""}</span></div>
+                  {a.decision_rationale && <p className="mt-1 text-fg-muted">{a.decision_rationale}</p>}
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {a.evidence_ids.slice(0, 3).map((e) => <EvidenceCite key={e} dealId={dealId} id={e} onOpen={onOpen} />)}
+                    <button type="button" className="ml-auto text-xs text-accent hover:underline" onClick={() => onDecide(a.id)}>Decide…</button>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 function EvidenceCite({ dealId, id, onOpen }: { dealId: string; id: string; onOpen: (t: ViewerTarget) => void }) {
   const ev = useEvidence(dealId, id);
   if (!ev.data) return <span className="font-mono text-[10px] text-fg-muted">{id.slice(0, 6)}</span>;
@@ -85,7 +163,8 @@ function EvidenceCite({ dealId, id, onOpen }: { dealId: string; id: string; onOp
 function StatementTable({ f, onCite }: { f: Financials; onCite: (eid: string) => void }) {
   const byKey = useMemo(() => { const m = new Map<string, Metric>(); for (const x of f.metrics) if (x.period_label) m.set(`${x.key}|${x.period_label}`, x); return m; }, [f.metrics]);
   return (
-    <Panel title={<span>Income statement <span className="ml-2 font-mono text-[11px] text-fg-muted">{f.periods[0]?.source_sheet}</span></span>}>
+    <Panel id="statement" title={<span>Income statement, as mapped from the workbook <span className="ml-2 font-mono text-[11px] text-fg-muted">{f.periods[0]?.source_sheet}</span></span>}>
+      <p className="mb-3 text-xs text-fg-muted">The source data behind everything above. Click a number to open the spreadsheet cell it was read from; calculated rows show their formula on hover.</p>
       <Table caption="Income statement by period" stickyFirst>
         <thead><tr><th className={th}>Line item</th>{f.periods.map((p) => <th key={p.id} className={`${th} text-right`}>{p.label}</th>)}</tr></thead>
         <tbody>
@@ -104,17 +183,17 @@ function StatementTable({ f, onCite }: { f: Financials; onCite: (eid: string) =>
           ))}
         </tbody>
       </Table>
-      <p className="mt-2 text-xs text-fg-muted">Extracted values link to the exact spreadsheet cell. Calculated rows show their formula on hover.</p>
     </Panel>
   );
 }
 
-function MetricCard({ m, label, onCite }: { m: Metric; label: string; onCite: (eid: string) => void }) {
+function MetricCard({ m, label, hint, onCite }: { m: Metric; label: string; hint: string; onCite: (eid: string) => void }) {
   const tone = m.key.includes("verified") ? "text-accent" : m.key.includes("seller") ? "text-graphite" : "";
   return (
     <div className="rounded-[var(--radius-3)] border border-hairline bg-bg-raised p-4">
       <div className="flex items-start justify-between gap-2"><p className="text-sm text-fg-muted">{label}</p><span className="text-[11px] text-fg-muted">{m.source}</span></div>
       <p className={`num mt-1 text-2xl ${tone}`}>{fmtValue(m.value, m.unit)}{m.requires_review && <StatusGlyph status="review_required" size={12} className="ml-2 inline align-middle" />}</p>
+      <p className="mt-1 text-xs text-fg-muted">{hint}</p>
       {m.missing_inputs.length > 0 && <p className="mt-1 text-xs text-amber">Missing: {m.missing_inputs.join(", ")}</p>}
       <details className="mt-2 text-xs">
         <summary className="cursor-pointer text-fg-muted hover:text-fg">Formula and inputs</summary>
@@ -131,7 +210,7 @@ function CfadsBridge({ m }: { m?: Metric }) {
   if (!b) return <p className="text-sm text-fg-muted">Run the base scenario to build the bridge.</p>;
   const rows: Array<[string, string, boolean]> = [["Adjusted EBITDA (year 1)", b.adjusted_ebitda, true], ["Maintenance capex", b.maintenance_capex, false], ["Cash taxes", b.cash_taxes, false], ["Working-capital investment", b.working_capital_investment, false], ["CFADS", b.cfads, true]];
   return (
-    <table className="w-full text-sm"><tbody>{rows.map(([l, v, bold]) => <tr key={l} className={bold ? "font-medium" : ""}><td className="py-1">{l}</td><td className="num py-1 text-right">{fmtMoney(v, { signed: !bold })}</td></tr>)}</tbody></table>
+    <table className="w-full text-sm"><caption className="sr-only">CFADS bridge: adjusted EBITDA less deductions equals CFADS</caption><tbody>{rows.map(([l, v, bold]) => <tr key={l} className={bold ? "font-medium" : ""}><td className="py-1">{l}</td><td className="num py-1 text-right">{fmtMoney(v, { signed: !bold })}</td></tr>)}</tbody></table>
   );
 }
 
@@ -148,10 +227,10 @@ function DecisionDialog({ dealId, adjustmentId, onClose, f }: { dealId: string; 
         <Dialog.Overlay className="fixed inset-0 z-50 bg-ink-950/40" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(520px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-[var(--radius-3)] border border-hairline bg-bg-raised p-5 shadow-[var(--shadow-2)] outline-none">
           <Dialog.Title className="text-lg font-medium">Decide on “{a?.label}”</Dialog.Title>
-          <Dialog.Description className="mt-1 text-sm text-fg-muted">The rule-based decision ({a?.decision.replace("_", " ")}) stays in the audit trail. Your decision recomputes verified adjusted EBITDA.</Dialog.Description>
+          <Dialog.Description className="mt-1 text-sm text-fg-muted">The rule-based decision ({STATUS_LABEL[a?.decision ?? ""] ?? a?.decision.replace("_", " ")}) stays in the audit trail. Your decision recomputes verified adjusted EBITDA.</Dialog.Description>
           <form className="mt-4 flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); if (rationale.trim()) m.mutate(); }}>
-            <Field label="Decision">{(p) => <select id={p.id} className={inputClass(false)} value={decision} onChange={(e) => setDecision(e.target.value)}>{["accepted", "rejected", "review_required", "unsupported"].map((d) => <option key={d} value={d}>{titleCase(d)}</option>)}</select>}</Field>
-            <Field label="Rationale" required>{(p) => <textarea id={p.id} className={inputClass(false, "h-24 py-2")} value={rationale} onChange={(e) => setRationale(e.target.value)} required />}</Field>
+            <Field label="Decision">{(p) => <select id={p.id} className={inputClass(false)} value={decision} onChange={(e) => setDecision(e.target.value)}>{["accepted", "rejected", "review_required", "unsupported"].map((d) => <option key={d} value={d}>{STATUS_LABEL[d] ?? titleCase(d)}</option>)}</select>}</Field>
+            <Field label="Rationale" required help="Why you decided this way; it appears in the audit history and the report.">{(p) => <textarea id={p.id} aria-describedby={p.describedBy} className={inputClass(false, "h-24 py-2")} value={rationale} onChange={(e) => setRationale(e.target.value)} required />}</Field>
             <div className="flex justify-end gap-2"><Dialog.Close asChild><Button type="button" variant="secondary">Cancel</Button></Dialog.Close><Button type="submit" loading={m.isPending}>Record decision</Button></div>
           </form>
         </Dialog.Content>

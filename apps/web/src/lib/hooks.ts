@@ -35,3 +35,10 @@ export function useLocalString(key: string): [string | null, (v: string | null) 
   const set = (v: string | null) => { try { if (v === null) localStorage.removeItem(key); else localStorage.setItem(key, v); } catch { /* ignore */ } emit(); };
   return [value, set];
 }
+
+const APPLE = /Mac|iPhone|iPad|iPod/i;
+const noSubscribe = () => () => {};
+/** Keyboard-shortcut modifier for this device: "⌘" on Apple platforms, "Ctrl" elsewhere. The server snapshot is "⌘" so hydration matches; the client corrects it on the first client render. */
+export function useModifierKey(): "⌘" | "Ctrl" {
+  return useSyncExternalStore(noSubscribe, () => (APPLE.test(navigator.platform || navigator.userAgent) ? "⌘" : "Ctrl"), () => "⌘");
+}

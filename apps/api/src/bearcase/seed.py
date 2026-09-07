@@ -126,6 +126,7 @@ def seed_for_demo_user(db: Session) -> Deal:
     user = get_or_create_demo_user(db)
     existing = db.scalar(select(Deal).where(Deal.owner_id == user.id, Deal.is_demo.is_(True)))
     if existing:
-        db.delete(existing)
-        db.flush()
+        from bearcase.auth import delete_deal_with_files
+
+        delete_deal_with_files(db, existing)
     return seed_northstar(db, user)

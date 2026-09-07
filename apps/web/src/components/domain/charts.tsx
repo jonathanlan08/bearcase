@@ -75,7 +75,7 @@ export function DscrGauge({ value, threshold, label }: { value: string | null; t
   const status = v === null ? "unsupported" : t !== null && v < t ? "breach" : t !== null && v < t * 1.1 ? "warning" : "supported";
   return (
     <figure className="w-full max-w-[260px]">
-      <div className="flex items-baseline justify-between"><span className="text-sm text-fg-muted">{label ?? "DSCR, year 1"}</span><span className="inline-flex items-center gap-1.5 num text-xl"><StatusGlyph status={status} size={14} />{fmtX(v)}</span></div>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5"><span className="shrink-0 whitespace-nowrap text-sm text-fg-muted">{label ?? "DSCR, year 1"}</span><span className="inline-flex shrink-0 items-center gap-1.5 num text-xl"><StatusGlyph status={status} size={14} />{fmtX(v)}</span></div>
       <svg viewBox={`0 0 ${W} ${H}`} className="mt-1 w-full" role="img" aria-label={`DSCR ${fmtX(v)} versus covenant threshold ${fmtX(t)}`}>
         <rect x={8} y={22} width={W - 16} height={10} rx={2} fill="var(--bg-muted)" />
         {t !== null && <rect x={8} y={22} width={x(t) - 8} height={10} rx={2} fill="var(--chart-red)" opacity={0.18} />}

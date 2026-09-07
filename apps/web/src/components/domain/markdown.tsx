@@ -35,7 +35,8 @@ type Inline =
   | { t: "strong"; c: Inline[] }
   | { t: "em"; c: Inline[] }
   | { t: "link"; href: string; c: Inline[] }
-  | { t: "cite"; kind: "E" | "M"; id: string };
+  /** `repeat` is set by `markRepeatedMetrics` on a metric marker whose id already appeared earlier in the same message. */
+  | { t: "cite"; kind: "E" | "M"; id: string; repeat?: boolean };
 
 // Alternatives are tried in this order at each position; the leftmost match wins. Emphasis content may not
 // cross its own delimiter, so "**a** b **c**" yields two strong runs rather than one.
@@ -195,8 +196,42 @@ function parseList(lines: string[], start: number): { block: ListBlock; next: nu
   return { block: { t: "list", ordered: head.ordered, start: head.num, items: items.map(conv) }, next: i };
 }
 
+/**
+ * A metric cited several times in one message renders its full chip once and a compact "same metric" marker after
+ * that, so a repeated "Verified adjusted EBITDA $1,810,000" does not dominate the answer. Walks the tree in reading
+ * order (table headers before rows, list items before their sub-lists). Evidence markers are left untouched: each
+ * one may point at a different place in a document, so each is worth opening.
+ */
+function markRepeatedMetrics(blocks: Block[], seen = new Set<string>()): void {
+  const inline = (nodes: Inline[]) => {
+    for (const n of nodes) {
+      if (n.t === "cite") {
+        if (n.kind !== "M") continue;
+        if (seen.has(n.id)) n.repeat = true;
+        else seen.add(n.id);
+      } else if (n.t === "strong" || n.t === "em" || n.t === "link") inline(n.c);
+    }
+  };
+  const list = (l: ListBlock) => { for (const it of l.items) { inline(it.c); if (it.sub) list(it.sub); } };
+  for (const b of blocks) {
+    switch (b.t) {
+      case "p": case "h": inline(b.c); break;
+      case "list": list(b); break;
+      case "quote": markRepeatedMetrics(b.blocks, seen); break;
+      case "table": b.head.forEach(inline); b.rows.forEach((r) => r.forEach(inline)); break;
+      case "code": case "hr": break;
+    }
+  }
+}
+
 /** Line-based, deterministic Markdown subset. Anything unrecognised is kept as paragraph text. */
 export function parseBlocks(text: string, depth = 0): Block[] {
+  const out = parseBlocksAt(text, depth);
+  if (depth === 0) markRepeatedMetrics(out);
+  return out;
+}
+
+function parseBlocksAt(text: string, depth: number): Block[] {
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   const out: Block[] = [];
   let i = 0;
@@ -259,7 +294,7 @@ export function parseBlocks(text: string, depth = 0): Block[] {
 
 interface Ctx { evidence: Map<string, EvidenceCite>; metrics: Map<string, MetricCite>; onOpen: (t: ViewerTarget) => void }
 
-function Cite({ kind, id, ctx }: { kind: "E" | "M"; id: string; ctx: Ctx }) {
+function Cite({ kind, id, repeat, ctx }: { kind: "E" | "M"; id: string; repeat?: boolean; ctx: Ctx }) {
   if (kind === "E") {
     const e = ctx.evidence.get(id);
     if (!e) return <span className="font-mono text-[10px] text-fg-muted">[source]</span>;
@@ -270,9 +305,19 @@ function Cite({ kind, id, ctx }: { kind: "E" | "M"; id: string; ctx: Ctx }) {
     );
   }
   const mm = ctx.metrics.get(id);
+  const title = mm ? `${mm.label}: ${mm.formula ?? "calculated"}` : "calculation";
+  const short = mm ? mm.label.split(" (")[0] : "calc";
+  if (repeat) {
+    // Same metric as an earlier chip in this message: a compact marker with the same tooltip, and the name for screen readers.
+    return (
+      <span className="mx-0.5 inline-flex h-[18px] items-center rounded-[var(--radius-1)] border border-hairline px-1 align-middle font-mono text-[10px] text-fg-muted" title={title} data-cite="metric-repeat">
+        same metric<span className="sr-only">: {short}</span>
+      </span>
+    );
+  }
   return (
-    <span className="mx-0.5 inline-flex h-[20px] items-center rounded-[var(--radius-1)] bg-bg-muted px-1.5 align-middle font-mono text-[11px] text-fg-muted" title={mm ? `${mm.label}: ${mm.formula ?? "calculated"}` : "calculation"}>
-      {mm ? `${mm.label.split(" (")[0]} ${fmtValue(mm.value, mm.unit)}` : "calc"}
+    <span className="mx-0.5 inline-flex h-[20px] items-center rounded-[var(--radius-1)] bg-bg-muted px-1.5 align-middle font-mono text-[11px] text-fg-muted" title={title} data-cite="metric">
+      {mm ? `${short} ${fmtValue(mm.value, mm.unit)}` : short}
     </span>
   );
 }
@@ -285,7 +330,7 @@ function renderInline(nodes: Inline[], ctx: Ctx): ReactNode[] {
       case "strong": return <strong key={i} className="font-semibold">{renderInline(n.c, ctx)}</strong>;
       case "em": return <em key={i}>{renderInline(n.c, ctx)}</em>;
       case "link": return <a key={i} href={n.href} title={n.href} target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">{renderInline(n.c, ctx)}</a>;
-      case "cite": return <Cite key={i} kind={n.kind} id={n.id} ctx={ctx} />;
+      case "cite": return <Cite key={i} kind={n.kind} id={n.id} repeat={n.repeat} ctx={ctx} />;
     }
   });
 }
@@ -353,8 +398,9 @@ function BlockView({ b, ctx }: { b: Block; ctx: Ctx }) {
 
 /**
  * Assistant text as React: a small Markdown subset (paragraphs, headings, lists, fenced code, quotes, GFM tables,
- * rules; bold, italic, code, http(s) links) plus [E:id]/[M:id] citation markers rendered as chips. No HTML injection:
- * everything is built as elements and React escapes the text.
+ * rules; bold, italic, code, http(s) links) plus [E:id]/[M:id] citation markers rendered as chips. A metric cited more
+ * than once gets one full chip and compact "same metric" markers after it. No HTML injection: everything is built as
+ * elements and React escapes the text.
  */
 export function Markdown({ text, citations, onOpen }: { text: string; citations: CitationSources; onOpen: (t: ViewerTarget) => void }) {
   const blocks = useMemo(() => parseBlocks(text), [text]);

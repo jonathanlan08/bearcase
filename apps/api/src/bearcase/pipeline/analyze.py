@@ -17,7 +17,7 @@ from bearcase.ai.provider import AIProvider, ChunkRef, ClaimContext, DocumentCon
 from bearcase.ai.retrieval import LexicalRetriever
 from bearcase.audit import record
 from bearcase.engine import formulas as f
-from bearcase.engine.metrics import LABOR_LINE_KEYS, LINE_KEYS, period_metrics
+from bearcase.engine.metrics import LABOR_LINE_KEYS, LINE_KEYS, format_multiple, format_plain, format_value, period_metrics
 from bearcase.engine.money import Calc, D
 from bearcase.engine.scenarios import ScenarioInputs, project
 from bearcase.ingest.customers import aggregate_customers
@@ -60,7 +60,7 @@ from bearcase.models.enums import (
     Severity,
 )
 from bearcase.pipeline.jobs import JobLog
-from bearcase.reports.assemble import assemble_report
+from bearcase.reports.assemble import DOC_TYPE_LABELS, assemble_report
 
 NARRATIVE_TYPES = {DocumentType.CIM, DocumentType.DEBT_TERM_SHEET, DocumentType.CUSTOMER_CONTRACT, DocumentType.ACQUISITION_MODEL}
 PRIMARY_TYPES = {
@@ -781,19 +781,42 @@ def extract_claims(
     return claims
 
 
+def _gap(diff: Decimal, unit: str) -> str:
+    """A difference expressed in the claim's own unit, in words a reader can follow."""
+    if unit == "pct":
+        return f"{diff:.1f} percentage points"
+    return _fmt(diff, unit)
+
+
 def _compare(claimed: Decimal, verified: Decimal, unit: str, comparator: str | None) -> tuple[bool, str]:
+    """Settle a numeric claim against the engine's figure and explain the outcome in plain words.
+
+    The explanation never shows Decimal repr; every number is formatted for the claim's unit."""
     tol = TOLERANCE.get(unit, Decimal("0"))
     if comparator == "lte":
         ok = verified <= claimed
         return (
             ok,
-            f"claim asserts at most {claimed}; verified value is {verified} ({'within' if ok else 'above'} the stated ceiling)",
+            f"the claim allows at most {_fmt(claimed, unit)} and the verified figure of {_fmt(verified, unit)} is "
+            f"{'within' if ok else 'above'} that ceiling",
         )
     if unit == "usd":
         diff = abs(claimed - verified) / (abs(verified) if verified else Decimal(1))
-        return diff <= tol, f"relative difference {diff * 100:.2f}% vs tolerance {tol * 100:.0f}%"
+        ok = diff <= tol
+        if diff == 0:
+            return True, "the figures match exactly"
+        return (
+            ok,
+            f"the gap is {_fmt(diff * 100, 'pct')} of the verified figure, {'within' if ok else 'beyond'} the "
+            f"{_fmt(tol * 100, 'pct')} allowed for rounding",
+        )
     diff = abs(claimed - verified)
-    return diff <= tol, f"absolute difference {diff:.4f} vs tolerance {tol}"
+    ok = diff <= tol
+    if diff == 0:
+        return True, "the figures match exactly"
+    if tol == 0:
+        return ok, f"the figures differ by {_gap(diff, unit)} and no rounding allowance applies"
+    return ok, f"the gap is {_gap(diff, unit)}, {'within' if ok else 'beyond'} the {_gap(tol, unit)} allowed for rounding"
 
 
 def verify_claims(
@@ -805,6 +828,7 @@ def verify_claims(
     periods: dict[str, FinancialPeriod],
 ) -> None:
     doc_by_id = {d.id: d for d in docs}
+    doc_of_evidence = {e.id: doc_by_id[d] for d in ev for e in ev[d] if d in doc_by_id}
     ordered = sorted(periods.values(), key=lambda p: p.ordinal)
     latest = ordered[-1] if ordered else None
     primary_chunks: list[tuple[Evidence, Document]] = [
@@ -846,7 +870,10 @@ def verify_claims(
                     )
                 claim.status = ClaimStatus.SUPPORTED if ok else ClaimStatus.CONTRADICTED
                 claim.status_rule = "numeric_match_within_tolerance" if ok else "numeric_mismatch_beyond_tolerance"
-                claim.status_rationale = f"{metric.label} computed from primary sources is {_fmt(metric.value, metric.unit.value)} versus the claimed {_fmt(claim.claimed_value, claim.claimed_unit.value)}; {detail}."
+                claim.status_rationale = (
+                    f"{metric.label} calculated from {_source_names(metric.evidence_ids, doc_of_evidence) or 'the primary documents'} "
+                    f"is {_fmt(metric.value, metric.unit.value)} against the {_fmt(claim.claimed_value, claim.claimed_unit.value)} claimed; {detail}."
+                )
         elif metric is not None and claim.metric_key and claim.metric_key.endswith("_recurring"):
             claim.verified_metric_id = metric.id
             claim.verified_value, claim.verified_unit = metric.value, metric.unit
@@ -862,7 +889,11 @@ def verify_claims(
                         )
                     )
                 claim.status, claim.status_rule = ClaimStatus.CONTRADICTED, "expense_recurs_across_periods"
-                claim.status_rationale = f"The expense described as one-time appears in {n} consecutive periods ({', '.join(metric.input_snapshot.get('periods', []))}) in the financial statements."
+                claim.status_rationale = (
+                    f"The expense described as one-time appears in {n} consecutive periods "
+                    f"({', '.join(metric.input_snapshot.get('periods', []))}) in "
+                    f"{_source_names(metric.evidence_ids, doc_of_evidence) or 'the financial statements'}."
+                )
             else:
                 claim.status, claim.status_rule, claim.status_rationale = (
                     ClaimStatus.REVIEW_REQUIRED,
@@ -873,7 +904,10 @@ def verify_claims(
             claim.verified_metric_id = metric.id
             claim.verified_value, claim.verified_unit = metric.value, metric.unit
             claim.status, claim.status_rule = ClaimStatus.UNSUPPORTED, "forward_assumption_exceeds_history"
-            claim.status_rationale = f"No document supports a forward growth rate of {_fmt(claim.claimed_value, 'pct')}; historical {metric.label} calculated from the statements is {_fmt(metric.value, 'pct')}."
+            claim.status_rationale = (
+                f"No document supports a forward growth rate of {_fmt(claim.claimed_value, 'pct')}; historical {metric.label} "
+                f"calculated from {_source_names(metric.evidence_ids, doc_of_evidence) or 'the statements'} is {_fmt(metric.value, 'pct')}."
+            )
         else:
             candidates_src = [(e, d) for e, d in primary_chunks if d.id != claim.document_id]
             if not candidates_src:
@@ -968,15 +1002,34 @@ def _customer_name(text: str) -> str | None:
 
 
 def _fmt(v: Decimal | None, unit: str) -> str:
-    if v is None:
-        return "n/a"
-    if unit == "usd":
-        return f"${v:,.0f}"
-    if unit == "pct":
-        return f"{v:.1f}%"
-    if unit == "multiple":
-        return f"{v:.2f}x"
-    return f"{v:g} {unit}" if unit not in ("text",) else str(v)
+    """Reader-facing number in the claim's unit; shared engine formatter, never Decimal repr."""
+    return format_value(v, unit)
+
+
+def _source_names(evidence_ids: list[Any], doc_of_evidence: dict[uuid.UUID, Document], limit: int = 2) -> str:
+    """Display names of the documents behind a list of evidence ids ("a.xlsx and b.csv"), or ""."""
+    names: list[str] = []
+    for eid in evidence_ids:
+        try:
+            doc = doc_of_evidence.get(uuid.UUID(str(eid)))
+        except ValueError:
+            doc = None
+        if doc is not None and doc.display_name not in names:
+            names.append(doc.display_name)
+        if len(names) == limit:
+            break
+    return " and ".join(names)
+
+
+def gist(text: str, limit: int = 100) -> str:
+    """Seller text shortened for a title: a model row 'label | value' reads as 'label of value', the
+    trailing period goes, and a long sentence is cut at a word boundary with an ellipsis."""
+    t = re.sub(r"\s+", " ", text).strip()
+    t = re.sub(r"\s*\|\s*", " of ", t, count=1) if t.count("|") == 1 else t.replace(" | ", ", ")
+    t = t.rstrip(".")
+    if len(t) <= limit:
+        return t
+    return t[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
 
 
 # ---------- findings ------------------------------------------------------------------------
@@ -992,7 +1045,179 @@ MISSING_CHECKLIST = [
 ]
 
 
+CLAIM_TYPE_LABELS: dict[ClaimType, str] = {
+    ClaimType.REVENUE: "revenue claim",
+    ClaimType.REVENUE_GROWTH: "growth claim",
+    ClaimType.CUSTOMER_CONCENTRATION: "customer concentration claim",
+    ClaimType.RECURRING_REVENUE: "recurring revenue claim",
+    ClaimType.CHURN: "churn claim",
+    ClaimType.ADJUSTED_EBITDA: "adjusted EBITDA claim",
+    ClaimType.ADDBACK: "add-back",
+    ClaimType.GROSS_MARGIN: "gross margin claim",
+    ClaimType.OPERATING_MARGIN: "operating margin claim",
+    ClaimType.MARGIN_IMPROVEMENT: "margin improvement",
+    ClaimType.FORECAST: "forecast",
+    ClaimType.CONTRACT_TERM: "contract term",
+    ClaimType.DEBT_TERM: "debt term",
+    ClaimType.ONE_TIME_EXPENSE: "one-time expense",
+}
+
+# What a contradicted claim means for the buyer, in plain words. The title already carries the
+# numbers, so these sentences never repeat them.
+CONTRADICTION_MEANING: dict[ClaimType, str] = {
+    ClaimType.REVENUE_GROWTH: (
+        "Growth slower than presented means the forecast, and any price built on it, rests on a weaker trend than the seller describes."
+    ),
+    ClaimType.ADJUSTED_EBITDA: (
+        "The seller's earnings figure includes add-backs the statements do not support, so a price set as a multiple of that figure would be too high."
+    ),
+    ClaimType.CUSTOMER_CONCENTRATION: (
+        "Relying on one customer for a large share of revenue puts cash flow at risk if that customer leaves; the downside scenarios model that loss."
+    ),
+    ClaimType.RECURRING_REVENUE: (
+        "Less revenue is locked in by contract than presented, so future cash flow is less predictable than the seller suggests."
+    ),
+    ClaimType.ADDBACK: "A cost that repeats every year is a normal running cost, not a one-off, and should not be added back to earnings.",
+    ClaimType.ONE_TIME_EXPENSE: (
+        "A cost that repeats every year is a normal running cost, not a one-off, and should not be added back to earnings."
+    ),
+    ClaimType.REVENUE: "The revenue in the seller's summary does not match the statements; ask which figure the price is based on.",
+    ClaimType.GROSS_MARGIN: (
+        "The margin in the seller's summary does not match the statements, which changes how much cash the business keeps from each sale."
+    ),
+    ClaimType.OPERATING_MARGIN: (
+        "The margin in the seller's summary does not match the statements, which changes how much cash the business keeps from each sale."
+    ),
+    ClaimType.CHURN: "More customers leave each year than presented, so revenue has to be replaced faster than the seller suggests.",
+    ClaimType.FORECAST: "The forecast is inconsistent with the documents provided; treat it as the seller's aspiration, not a basis for price.",
+    ClaimType.MARGIN_IMPROVEMENT: (
+        "The projected margin gains are inconsistent with the documents provided; do not pay for improvements that have not happened."
+    ),
+    ClaimType.CONTRACT_TERM: "The signed contract does not say what the seller's summary says it does; rely on the document, not the summary.",
+    ClaimType.DEBT_TERM: "The financing terms differ from what was presented; recheck the debt payments and coverage in the scenarios.",
+}
+_CONTRADICTION_DEFAULT = (
+    "The seller's figure differs from what the primary documents show; ask the seller to reconcile the two before relying on it."
+)
+
+# What an unsupported claim means for the buyer. Absence of evidence is not proof the claim is wrong.
+UNSUPPORTED_MEANING: dict[ClaimType, str] = {
+    ClaimType.CHURN: (
+        "No document in the deal room supports this churn figure; a customer list with renewal history by year would let it be "
+        "checked. Ask the seller for churn by year."
+    ),
+    ClaimType.FORECAST: (
+        "A forecast with no pipeline, contracts, or plan behind it is the seller's expectation, not a fact; do not pay for it until "
+        "the seller shows how it will be achieved."
+    ),
+    ClaimType.MARGIN_IMPROVEMENT: (
+        "Margin gains that depend on future pricing or efficiency have not happened yet; price the business on the margins it earns today."
+    ),
+    ClaimType.ADDBACK: (
+        "No statement line or contract supports this add-back. If it depends on what a buyer would do after closing, it is not part "
+        "of historical earnings and should stay out of the price."
+    ),
+}
+_UNSUPPORTED_DEFAULT = (
+    "Nothing in the deal room backs this statement up; treat it as the seller's view until they provide support."
+)
+
+
+def _contradiction_title(c: Claim, metric: FinancialMetric | None, source: Document | None) -> str:
+    """'Revenue CAGR is 11.6%, not the 18.0% in the CIM': the figure, the gap, and which seller document
+    said it, so two claims about the same metric from different documents get distinct titles."""
+    if c.status_rule == "expense_recurs_across_periods" and metric is not None and metric.value is not None:
+        subject = metric.label.split(" recurrence")[0]
+        return f"{subject} recurs across {format_plain(metric.value)} consecutive periods; it is not a one-time cost"
+    if metric is not None and c.verified_value is not None and c.claimed_value is not None:
+        verified = _fmt(c.verified_value, (c.verified_unit or c.claimed_unit).value)
+        claimed = _fmt(c.claimed_value, c.claimed_unit.value)
+        where = (
+            f" in the {DOC_TYPE_LABELS.get(source.doc_type.value, source.doc_type.value.replace('_', ' '))}"
+            if source is not None
+            else " claimed"
+        )
+        if (c.normalized or {}).get("comparator") == "lte":
+            return f"{metric.label} is {verified}, above the {claimed} ceiling{where}"
+        return f"{metric.label} is {verified}, not the {claimed}{where}"
+    return f"Contradicted: {gist(c.claim_text)}"
+
+
+# Meanings that assume the seller's figure was the more favourable one. For these the sentence is used only
+# when the numbers show that direction; an understated figure gets the neutral default instead.
+_DIRECTIONAL = {
+    ClaimType.REVENUE_GROWTH,
+    ClaimType.ADJUSTED_EBITDA,
+    ClaimType.RECURRING_REVENUE,
+    ClaimType.CHURN,
+    ClaimType.CUSTOMER_CONCENTRATION,
+    ClaimType.MARGIN_IMPROVEMENT,
+}
+_LOWER_IS_FAVOURABLE = {ClaimType.CHURN, ClaimType.CUSTOMER_CONCENTRATION}
+
+
+def _seller_overstated(c: Claim) -> bool | None:
+    """True when the seller's figure is the more flattering one, None when the values are missing."""
+    if c.claimed_value is None or c.verified_value is None:
+        return None
+    if (c.normalized or {}).get("comparator") == "lte":
+        return True  # the documents exceed a ceiling the seller promised
+    diff = c.claimed_value - c.verified_value
+    return diff < 0 if c.claim_type in _LOWER_IS_FAVOURABLE else diff > 0
+
+
+def _contradiction_detail(c: Claim, sources: str) -> str:
+    meaning = CONTRADICTION_MEANING.get(c.claim_type, _CONTRADICTION_DEFAULT)
+    if c.claim_type in _DIRECTIONAL and _seller_overstated(c) is not True:
+        meaning = _CONTRADICTION_DEFAULT
+    return f"{meaning} Checked against {sources}." if sources else meaning
+
+
+def _unsupported_title(c: Claim, metric: FinancialMetric | None) -> str:
+    if c.status_rule == "forward_assumption_exceeds_history" and c.verified_value is not None and c.claimed_value is not None:
+        claimed = _fmt(c.claimed_value, c.claimed_unit.value)
+        verified = _fmt(c.verified_value, (c.verified_unit or c.claimed_unit).value)
+        return f"Model assumes {claimed} growth; history shows {verified}"
+    return f"Unsupported {CLAIM_TYPE_LABELS.get(c.claim_type, 'claim')}: \u201c{gist(c.claim_text, 90)}\u201d"
+
+
+def _unsupported_detail(c: Claim, source_name: str, history_sources: str) -> str:
+    if c.status_rule == "forward_assumption_exceeds_history":
+        faster = c.claimed_value is not None and c.verified_value is not None and c.claimed_value > c.verified_value
+        text = (
+            "The projections in the acquisition model, and any price derived from them, assume faster growth than the company "
+            "has achieved. Ask what supports the step-up."
+            if faster
+            else "The growth rate in the acquisition model is an assumption, not a documented result; ask what supports it."
+        )
+        history = f"; history from {history_sources}" if history_sources else ""
+        return f"{text} Stated in {source_name}{history}."
+    return f"{UNSUPPORTED_MEANING.get(c.claim_type, _UNSUPPORTED_DEFAULT)} Stated in {source_name}."
+
+
+def _share_words(pct: Decimal) -> str:
+    if pct >= 55:
+        return "More than half"
+    if pct >= 45:
+        return "About half"
+    if pct >= 28:
+        return "Roughly a third"
+    if pct >= 22:
+        return "Roughly a quarter"
+    if pct >= 17:
+        return "Roughly a fifth"
+    return "A sizeable share"
+
+
 def build_findings(db: Session, deal: Deal, docs: list[Document], ev: dict[uuid.UUID, list[Evidence]]) -> None:
+    """Findings are the reader's entry point: the title says what is wrong (with formatted figures), the
+    detail says what it means for the buyer and names the document it was checked against. Ids stay in
+    evidence_ids and metric_ids, never in the text."""
+    doc_by_id = {d.id: d for d in docs}
+    doc_of_evidence = {e.id: doc_by_id[d] for d in ev for e in ev[d] if d in doc_by_id}
+    metric_by_id = {m.id: m for m in db.scalars(select(FinancialMetric).where(FinancialMetric.deal_id == deal.id))}
+    cim_doc = next((d for d in docs if d.doc_type == DocumentType.CIM), None)
+
     def add(
         key: str,
         kind: FindingKind,
@@ -1021,13 +1246,17 @@ def build_findings(db: Session, deal: Deal, docs: list[Document], ev: dict[uuid.
     high = {ClaimType.REVENUE_GROWTH, ClaimType.ADJUSTED_EBITDA, ClaimType.CUSTOMER_CONCENTRATION, ClaimType.RECURRING_REVENUE}
     for c in db.scalars(select(Claim).where(Claim.deal_id == deal.id)):
         con = [link.evidence_id for link in c.links if link.role == LinkRole.CONTRADICTING]
+        metric = metric_by_id.get(c.verified_metric_id) if c.verified_metric_id else None
+        source_doc = doc_by_id.get(c.document_id)
+        source_name = source_doc.display_name if source_doc else "the seller's document"
+        history = _source_names(metric.evidence_ids, doc_of_evidence) if metric is not None else ""
         if c.status == ClaimStatus.CONTRADICTED:
             add(
                 f"contradiction:{c.key}",
                 FindingKind.CONTRADICTION,
                 Severity.HIGH if c.claim_type in high else Severity.MEDIUM,
-                f"Contradicted: {c.claim_text[:90]}",
-                c.status_rationale or "",
+                _contradiction_title(c, metric, source_doc),
+                _contradiction_detail(c, _source_names(con, doc_of_evidence) or history),
                 con,
                 [c.verified_metric_id] if c.verified_metric_id else [],
                 c.id,
@@ -1042,8 +1271,8 @@ def build_findings(db: Session, deal: Deal, docs: list[Document], ev: dict[uuid.
                 f"unsupported:{c.key}",
                 FindingKind.UNSUPPORTED_ASSUMPTION,
                 Severity.MEDIUM,
-                f"Unsupported: {c.claim_text[:90]}",
-                c.status_rationale or "",
+                _unsupported_title(c, metric),
+                _unsupported_detail(c, source_name, history),
                 [c.source_evidence_id] if c.source_evidence_id else [],
                 [c.verified_metric_id] if c.verified_metric_id else [],
                 c.id,
@@ -1051,15 +1280,20 @@ def build_findings(db: Session, deal: Deal, docs: list[Document], ev: dict[uuid.
     top = _metric(db, deal, "customer_concentration_top1")
     top_name = top.input_snapshot.get("top_customer_name") if top else None
     if top and top.value is not None and top.value > 15:
+        snap = top.input_snapshot
+        source = _source_names(top.evidence_ids, doc_of_evidence) or "the customer revenue file"
         add(
             "concentration:top1",
             FindingKind.CONCENTRATION,
             Severity.HIGH,
-            f"{top_name} represents {top.value:.1f}% of revenue",
-            f"The largest customer accounts for {top.value:.1f}% of revenue ({_fmt(D(top.input_snapshot.get('top_customer_revenue')), 'usd')} of {_fmt(D(top.input_snapshot.get('total_revenue')), 'usd')}). Loss of this account is modeled in the downside scenarios.",
+            f"{top_name or 'The largest customer'} is {_fmt(top.value, 'pct')} of revenue",
+            f"{_share_words(top.value)} of revenue comes from a single customer "
+            f"({_fmt(D(snap.get('top_customer_revenue')), 'usd')} of {_fmt(D(snap.get('total_revenue')), 'usd')}), according to {source}. "
+            "If that customer leaves, the cash available for debt payments falls sharply; the downside scenarios model that loss.",
             [uuid.UUID(x) for x in top.evidence_ids],
             [top.id],
         )
+    notice_re = re.compile(r"((?:[A-Za-z]+|\d+)(?:\s*\(\d+\))?\s+days'?(?:\s+(?:prior|written|advance))*\s+notice)", re.I)
     for doc in docs:
         for e in ev.get(doc.id, []):
             if doc.doc_type == DocumentType.CUSTOMER_CONTRACT and re.search(r"terminat\w+ .*for convenience", e.text, re.I):
@@ -1068,21 +1302,28 @@ def build_findings(db: Session, deal: Deal, docs: list[Document], ev: dict[uuid.
                     if top_name and top_name.lower() in " ".join(x.text for x in ev[doc.id][:3]).lower()
                     else "a customer"
                 )
+                notice = notice_re.search(e.text)
+                when = notice.group(1) if notice else "notice"
+                penalty = " and without penalty" if re.search(r"without (?:any )?penalty|no penalty", e.text, re.I) else ""
                 add(
                     f"risk:termination:{doc.id}",
                     FindingKind.RISK,
                     Severity.HIGH if who == top_name else Severity.MEDIUM,
-                    f"{who} may terminate for convenience",
-                    f"{doc.display_name}: {e.text[:300]}",
+                    f"{who[0].upper() + who[1:]} can end its contract early without cause",
+                    f"The agreement lets the customer cancel on {when}{penalty} (termination for convenience), so this "
+                    f"revenue is not locked in for the stated term. Clause in {doc.display_name}: \u201c{gist(e.text, 160)}\u201d",
                     [e.id],
                 )
             if e.contains_instruction_text:
+                page = e.locator.get("page")
+                where = f"Page {page} of {doc.display_name}" if page else doc.display_name
                 add(
                     f"integrity:{e.id}",
                     FindingKind.DOCUMENT_INTEGRITY,
                     Severity.LOW,
-                    f"Instruction-like text in {doc.display_name}",
-                    f'Page {e.locator.get("page", "?")} contains text addressed to automated readers. It was stored as inert document content and did not influence any status: "{e.text[:200]}"',
+                    f"Text addressed to automated readers in {doc.display_name}",
+                    f"{where} contains wording aimed at software rather than a reader: \u201c{gist(e.text, 160)}\u201d. BearCase treats "
+                    "document text as data only, so it changed no result; it is worth asking the seller why it is there.",
                     [e.id],
                 )
     names = " ".join(d.display_name.lower() for d in docs)
@@ -1090,11 +1331,13 @@ def build_findings(db: Session, deal: Deal, docs: list[Document], ev: dict[uuid.
     for kw, title, reason in MISSING_CHECKLIST:
         if kw.replace(" ", "") in names.replace(" ", "").replace("-", "") or kw in names:
             continue
-        detail = reason + (" The CIM references this document but it was not provided." if kw in cim_text else "")
+        referenced = kw in cim_text
+        cim_name = f" ({cim_doc.display_name})" if cim_doc else ""
+        detail = reason + (f" The CIM{cim_name} refers to it but it was not provided." if referenced else "")
         add(
             f"missing:{kw}",
             FindingKind.MISSING_DOCUMENT,
-            Severity.MEDIUM if kw in cim_text else Severity.LOW,
+            Severity.MEDIUM if referenced else Severity.LOW,
             f"Missing: {title}",
             detail,
         )
@@ -1273,7 +1516,7 @@ def run_scenario(db: Session, deal: Deal, scenario: Scenario, user_id: uuid.UUID
         event_type="scenario.run",
         object_type="scenario_result",
         object_id=result.id,
-        summary=f"Ran scenario '{scenario.name}' (run {run_no}); DSCR {out.dscr if out.dscr is not None else 'n/a'}",
+        summary=f"Ran scenario '{scenario.name}' (run {run_no}); year-1 DSCR {format_multiple(out.dscr) if out.dscr is not None else 'n/a'}",
         payload={"scenario_id": str(scenario.id), "input_hash": inp.hash(), "warnings": [w["code"] for w in out.warnings]},
     )
     return result
@@ -1332,16 +1575,52 @@ def record_scenario_metrics(db: Session, deal: Deal, results: dict[ScenarioKind,
             input_snapshot={"scenario_result_id": str(base.id), "method": "periodic IRR"},
             requires_review=base.outputs.get("irr_pct") is None,
         )
+    debt_doc = db.scalar(select(Document).where(Document.deal_id == deal.id, Document.doc_type == DocumentType.DEBT_TERM_SHEET))
+    threshold = (
+        _fmt(deal.covenant_dscr_threshold, "multiple") if deal.covenant_dscr_threshold is not None else "the lender's minimum"
+    )
+    # The threshold is entered on the deal form; the term sheet only confirms it when a supported debt-term claim says so.
+    confirmed = (
+        db.scalar(
+            select(Claim).where(
+                Claim.deal_id == deal.id,
+                Claim.claim_type == ClaimType.DEBT_TERM,
+                Claim.status == ClaimStatus.SUPPORTED,
+                (Claim.claim_text.ilike("%coverage%") | Claim.claim_text.ilike("%DSCR%")),
+            )
+        )
+        if debt_doc
+        else None
+    )
+    set_in = (
+        f", entered in the deal terms and confirmed in {debt_doc.display_name}"
+        if confirmed and debt_doc
+        else ", entered in the deal terms"
+    )
     for kind, res in results.items():
         dscr_m = _metric(db, deal, "dscr_base")
+        name = res.scenario.name if res.scenario is not None else kind.value.replace("_", " ").capitalize()
         for w in res.warnings:
             if w["code"] in ("covenant_breach", "covenant_warning") and w.get("year") == 1:
+                breach = w["code"] == "covenant_breach"
                 sev = (
                     Severity.CRITICAL
-                    if (w["code"] == "covenant_breach" and kind == ScenarioKind.DOWNSIDE)
+                    if (breach and kind == ScenarioKind.DOWNSIDE)
                     else Severity.HIGH
-                    if w["code"] == "covenant_breach"
+                    if breach
                     else Severity.MEDIUM
+                )
+                raw = res.outputs.get("year1", {}).get("dscr")
+                dscr = _fmt(D(raw), "multiple") if raw is not None else "n/a"
+                title = (
+                    f"{name} scenario breaks the debt coverage covenant ({dscr} against {threshold})"
+                    if breach
+                    else f"{name} scenario is close to the debt coverage covenant ({dscr} against {threshold})"
+                )
+                consequence = (
+                    "Below the minimum the lender can call a default, demand more equity, or block distributions to the owner."
+                    if breach
+                    else "The cushion is thin: a small shortfall in cash flow would put the loan in breach."
                 )
                 db.add(
                     Finding(
@@ -1349,8 +1628,12 @@ def record_scenario_metrics(db: Session, deal: Deal, results: dict[ScenarioKind,
                         key=f"covenant:{kind.value}",
                         kind=FindingKind.COVENANT_WARNING,
                         severity=sev,
-                        title=f"{kind.value.replace('_', ' ').capitalize()} scenario: {w['message'][:120]}",
-                        detail=w["message"] + f" Scenario result {res.id} (run {res.run_no}) preserves the full input snapshot.",
+                        title=title[:255],
+                        detail=(
+                            f"In the {name.lower()} scenario (run {res.run_no}), year-one cash available for debt payments covers "
+                            f"the payments due {dscr}; the lender's minimum is {threshold}{set_in}. {consequence} "
+                            "The run keeps every input it used, so it can be reopened and compared."
+                        ),
                         evidence_ids=[],
                         metric_ids=[str(dscr_m.id)] if dscr_m else [],
                         status=FindingStatus.OPEN,
