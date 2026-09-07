@@ -1,8 +1,9 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useState } from "react";
-import { api, ApiError, type Deal, type User } from "@/lib/api";
+import { api, ApiError, errorDetail, type Deal, type User } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Field, inputClass } from "@/components/ui/field";
 import { EvidenceLinkMark, Skeleton, Wordmark } from "@/components/ui/primitives";
@@ -35,6 +36,8 @@ function SignIn() {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [form, setForm] = useState({ email: "", password: "", display_name: "" });
   const [error, setError] = useState<string | null>(null);
+  // The account that was just created; the gate shows "Check your email" before handing over to the workspace.
+  const [registered, setRegistered] = useState<User | null>(null);
   const demo = useMutation({
     mutationFn: () => api.post<Deal>("/api/demo/session"),
     onSuccess: (deal) => { qc.invalidateQueries({ queryKey: qk.me }); router.push(`/app/deals/${deal.id}`); },
@@ -42,9 +45,24 @@ function SignIn() {
   });
   const auth = useMutation({
     mutationFn: () => api.post<User>(mode === "login" ? "/api/auth/login" : "/api/auth/register", mode === "login" ? { email: form.email, password: form.password } : form),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.me }),
-    onError: (e) => setError(e instanceof ApiError ? String(e.detail) : "Sign-in failed"),
+    onSuccess: (user) => { if (mode === "register") setRegistered(user); else qc.invalidateQueries({ queryKey: qk.me }); },
+    onError: (e) => setError(errorDetail(e, "Sign-in failed")),
   });
+  if (registered) {
+    return (
+      <main id="main" className="grid min-h-svh place-items-center p-6">
+        <div className="w-full max-w-md">
+          <Wordmark size="lg" />
+          <h1 className="mt-6 text-3xl">Check your email</h1>
+          <p className="mt-2 text-sm text-fg-muted">We sent a verification link to <span className="font-medium text-fg">{registered.email}</span>. It works for 24 hours. You can open your workspace now; sharing a deal waits until the address is verified.</p>
+          <div className="mt-6 flex flex-wrap gap-2">
+            <Button onClick={() => qc.invalidateQueries({ queryKey: qk.me })}>Continue to your deals</Button>
+          </div>
+          <p className="mt-4 text-xs text-fg-muted">No email? Check the spam folder, or resend the link from the banner inside the workspace.</p>
+        </div>
+      </main>
+    );
+  }
   return (
     <main id="main" className="grid min-h-svh place-items-center p-6">
       <div className="w-full max-w-md">
@@ -68,6 +86,7 @@ function SignIn() {
             <Field label="Password" help="At least 8 characters." required>{(p) => <input {...p} type="password" className={inputClass(p.invalid)} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required minLength={8} autoComplete={mode === "login" ? "current-password" : "new-password"} />}</Field>
             {error && <p role="alert" className="text-sm text-red">{error}</p>}
             <Button type="submit" variant="secondary" loading={auth.isPending}>{mode === "login" ? "Sign in" : "Create account"}</Button>
+            {mode === "login" && <Link href="/forgot" className="self-start text-xs text-fg-muted underline-offset-2 hover:text-fg hover:underline">Forgot password?</Link>}
           </div>
         </form>
         <p className="mt-6 text-xs text-fg-muted">BearCase is an educational prototype and does not provide financial, legal, tax, or investment advice.</p>

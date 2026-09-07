@@ -10,7 +10,7 @@ from fastapi import APIRouter, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from bearcase.api.deps import DbDep, DealDep, UserDep
+from bearcase.api.deps import DbDep, DealDep, OwnerDealDep, UserDep
 from bearcase.audit import record
 from bearcase.chat.providers import PRICING_NOTE, estimate_cost
 from bearcase.models import (
@@ -170,7 +170,7 @@ def to_jsonl(rows: list[dict[str, Any]]) -> str:
 
 
 @router.get("/deals/{deal_id}/review-dataset")
-def review_dataset(deal: DealDep, db: DbDep, user: UserDep) -> Response:
+def review_dataset(deal: OwnerDealDep, db: DbDep, user: UserDep) -> Response:
     rows = review_dataset_rows(db, deal)
     record(
         db,

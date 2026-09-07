@@ -68,7 +68,8 @@ export const api = {
 export type ClaimStatus = "pending" | "supported" | "contradicted" | "unsupported" | "review_required";
 export type Unit = "usd" | "pct" | "multiple" | "months" | "years" | "count" | "text";
 
-export interface User { id: string; email: string; display_name: string; is_demo: boolean }
+/** `email_verified` is false until the link in the verification email is opened; demo identities are never verified. */
+export interface User { id: string; email: string; display_name: string; is_demo: boolean; email_verified: boolean }
 
 export interface Deal {
   id: string; company_name: string; industry: string; purchase_price: string; purchase_price_basis: string; purchase_date: string | null;
@@ -135,4 +136,53 @@ export interface Usage {
   /** Null when a model has no entry in the price table; `pricing_note` says so. */
   cost_estimate_usd: number | null;
   pricing_note: string;
+}
+
+/* ---------- Accounts, sharing, chat budget, billing (see api/routes/auth.py, deals members, billing.py) ---------- */
+
+export type MemberRole = "viewer" | "editor";
+/** `accepted` is false while the invite email has not been opened by a signed-in account with that address. */
+export interface DealMember { id: string; email: string; role: MemberRole; accepted: boolean }
+export interface DealMembers { owner: { email: string; display_name: string }; members: DealMember[] }
+
+/** Assistant answers counted per calendar month (UTC) across every deal the user asked in; the API refuses with 429 at the limit. */
+export interface ChatBudget { limit: number; used: number; resets_on: string }
+
+export type PurchaseStatus = "pending" | "paid" | "failed";
+export interface Purchase { id: string; kind: string; amount_cents: number; currency: string; status: PurchaseStatus; deal_id: string | null; created_at: string; paid_at: string | null }
+/** `configured` is false when the API has no Stripe keys; the page then offers a mailto instead of checkout. */
+export interface BillingStatus { configured: boolean; pilot: { amount_cents: number; currency: string; description: string }; purchases: Purchase[] }
+
+export const auth = {
+  verify: (token: string) => api.post<{ verified: boolean }>("/api/auth/verify", { token }),
+  resendVerification: () => api.post<unknown>("/api/auth/resend-verification"),
+  requestReset: (email: string) => api.post<unknown>("/api/auth/request-reset", { email }),
+  reset: (token: string, password: string) => api.post<unknown>("/api/auth/reset", { token, password }),
+};
+
+export const members = {
+  list: (dealId: string) => api.get<DealMembers>(`/api/deals/${dealId}/members`),
+  invite: (dealId: string, email: string, role: MemberRole) => api.post<DealMember>(`/api/deals/${dealId}/members`, { email, role }),
+  remove: (dealId: string, memberId: string) => api.del(`/api/deals/${dealId}/members/${memberId}`),
+  accept: (token: string) => api.post<{ deal_id: string }>("/api/invites/accept", { token }),
+};
+
+export const billing = {
+  status: () => api.get<BillingStatus>("/api/billing/status"),
+  checkout: (dealId?: string) => api.post<{ url: string }>("/api/billing/checkout", dealId ? { deal_id: dealId } : {}),
+};
+
+/** Whole units with the currency's symbol when Intl knows it ("$500.00"); the amount is the server's minor units. */
+export function fmtPrice(amountCents: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: currency.toUpperCase() }).format(amountCents / 100);
+  } catch {
+    return `${(amountCents / 100).toFixed(2)} ${currency.toUpperCase()}`;
+  }
+}
+
+/** The API's `{detail}` string, or a fallback when the failure was not one of its own replies. */
+export function errorDetail(e: unknown, fallback: string): string {
+  if (e instanceof ApiError && typeof e.detail === "string" && e.detail) return e.detail;
+  return fallback;
 }

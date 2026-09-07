@@ -20,6 +20,7 @@ class UserOut(Out):
     email: str
     display_name: str
     is_demo: bool
+    email_verified: bool = False
 
 
 class LoginRequest(BaseModel):
@@ -29,6 +30,52 @@ class LoginRequest(BaseModel):
 
 class RegisterRequest(LoginRequest):
     display_name: str = Field(min_length=1, max_length=120)
+
+
+class TokenRequest(BaseModel):
+    """A link token from an email (verification or invitation)."""
+
+    token: str = Field(min_length=16, max_length=200)
+
+
+class RequestResetRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+
+
+class ResetPasswordRequest(TokenRequest):
+    password: str = Field(min_length=8, max_length=200)
+
+
+class MemberInvite(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    role: Literal["viewer", "editor"] = "viewer"
+
+    @field_validator("email")
+    @classmethod
+    def _normalize_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if "@" not in v or v.startswith("@") or v.endswith("@"):
+            raise PydanticCustomError("email", "Enter an email address.")
+        return v
+
+
+class MemberOut(BaseModel):
+    id: uuid.UUID
+    email: str
+    role: Literal["viewer", "editor"]
+    accepted: bool
+    display_name: str | None = None
+
+
+class MembersOut(BaseModel):
+    owner: dict[str, str]
+    members: list[MemberOut]
+    role: Literal["owner", "editor", "viewer"]
+    limit: int
+
+
+class CheckoutRequest(BaseModel):
+    deal_id: uuid.UUID | None = None
 
 
 def _money(value: Decimal) -> str:
@@ -124,6 +171,7 @@ class DealOut(Out):
 
 
 class DealListItem(DealOut):
+    role: Literal["owner", "editor", "viewer"] = "owner"
     document_count: int = 0
     documents_ready: int = 0
     claim_counts: dict[str, int] = Field(default_factory=dict)

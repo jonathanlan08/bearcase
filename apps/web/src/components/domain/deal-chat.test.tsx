@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ConnectModel, DealChat, MessageView, QUICK_PROMPTS, isRateLimit, type ChatConfig, type ChatOption, type Msg } from "./deal-chat";
+import { ConnectModel, DealChat, MessageView, QUICK_PROMPTS, budgetLine, isBudgetExhausted, isRateLimit, type ChatConfig, type ChatOption, type Msg } from "./deal-chat";
 import { askTheDeal, getChatBusState, onChatPrompt, resetChatBus, setChatOpen, takeChatPrompt } from "@/lib/chat-bus";
 import { fmtDate } from "@/lib/format";
 
@@ -145,6 +145,15 @@ describe("MessageView progress", () => {
     expect(isRateLimit("Too many requests. Try again in 30 seconds.")).toBe(true);
     expect(isRateLimit("Google Gemini rate limit reached (free tier).")).toBe(true);
     expect(isRateLimit("Stopped.")).toBe(false);
+  });
+
+  it("treats the monthly budget refusal as a wait, and words the budget line from the config", () => {
+    const refusal = "You have used this month's 300 assistant answers. The budget resets on 1 October 2026.";
+    expect(isBudgetExhausted(refusal)).toBe(true);
+    expect(isRateLimit(refusal)).toBe(true);
+    expect(isBudgetExhausted("Too many requests. Try again in 30 seconds.")).toBe(false);
+    expect(budgetLine({ limit: 300, used: 12, resets_on: "2026-10-01" })).toBe("12 of 300 answers used this month");
+    expect(budgetLine(undefined)).toBeNull();
     const { getByText, container, rerender } = render(<ol><MessageView m={msg({ content: "", error: "Too many requests. Try again in 30 seconds." })} onOpen={noop} /></ol>);
     const err = getByText("Too many requests. Try again in 30 seconds.");
     expect(err.className).not.toContain("text-red");

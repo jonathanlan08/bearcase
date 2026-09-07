@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
-from bearcase.api.deps import DbDep, DealDep, UserDep
+from bearcase.api.deps import DbDep, DealDep, EditorDealDep, UserDep
 from bearcase.api.schemas import (
     AssumptionsUpdate,
     ScenarioCreate,
@@ -59,7 +59,7 @@ def facts(deal: DealDep, db: DbDep) -> ScenarioFactsOut:
 
 
 @router.post("/deals/{deal_id}/scenarios", response_model=ScenarioOut, status_code=201)
-def create_scenario(deal: DealDep, body: ScenarioCreate, db: DbDep, user: UserDep) -> ScenarioOut:
+def create_scenario(deal: EditorDealDep, body: ScenarioCreate, db: DbDep, user: UserDep) -> ScenarioOut:
     existing = ensure_scenarios(db, deal)
     base = (
         _get(deal, body.base_on_scenario_id, db)
@@ -95,7 +95,9 @@ def create_scenario(deal: DealDep, body: ScenarioCreate, db: DbDep, user: UserDe
 
 
 @router.put("/deals/{deal_id}/scenarios/{scenario_id}/assumptions", response_model=ScenarioOut)
-def update_assumptions(deal: DealDep, scenario_id: uuid.UUID, body: AssumptionsUpdate, db: DbDep, user: UserDep) -> ScenarioOut:
+def update_assumptions(
+    deal: EditorDealDep, scenario_id: uuid.UUID, body: AssumptionsUpdate, db: DbDep, user: UserDep
+) -> ScenarioOut:
     sc = _get(deal, scenario_id, db)
     changes = {}
     by_key = {a.key: a for a in sc.assumptions}
@@ -136,7 +138,7 @@ def update_assumptions(deal: DealDep, scenario_id: uuid.UUID, body: AssumptionsU
 
 
 @router.post("/deals/{deal_id}/scenarios/{scenario_id}/run", response_model=ScenarioResultOut, status_code=201)
-def run(deal: DealDep, scenario_id: uuid.UUID, db: DbDep, user: UserDep) -> ScenarioResultOut:
+def run(deal: EditorDealDep, scenario_id: uuid.UUID, db: DbDep, user: UserDep) -> ScenarioResultOut:
     sc = _get(deal, scenario_id, db)
     try:
         result = run_scenario(db, deal, sc, user.id)

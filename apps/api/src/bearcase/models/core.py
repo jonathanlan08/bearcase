@@ -1,4 +1,4 @@
-"""Domain model. Twenty-one tables; every deal-owned row is scoped through Deal.owner_id."""
+"""Domain model. Twenty-four tables; every deal-owned row is reached through Deal.owner_id or an accepted deal_members row."""
 
 from __future__ import annotations
 
@@ -42,8 +42,11 @@ from bearcase.models.enums import (
     JobStatus,
     JobType,
     LinkRole,
+    MemberRole,
     MetricSource,
+    PurchaseKind,
     PurchasePriceBasis,
+    PurchaseStatus,
     ReportStatus,
     ReviewAction,
     ReviewOutcome,
@@ -51,6 +54,7 @@ from bearcase.models.enums import (
     RunType,
     ScenarioKind,
     Severity,
+    TokenPurpose,
 )
 
 Money = Numeric(20, 2)
@@ -67,8 +71,13 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(255))
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     deals: Mapped[list[Deal]] = relationship(back_populates="owner")
+
+    @property
+    def email_verified(self) -> bool:
+        return self.email_verified_at is not None
 
 
 class UserSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -76,6 +85,21 @@ class UserSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    user: Mapped[User] = relationship()
+
+
+class AuthToken(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A single-use link token (email verification, password reset, deal invitation). Only the SHA-256 of the
+    random token is stored; the token itself travels once, in the email link."""
+
+    __tablename__ = "auth_tokens"
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    purpose: Mapped[TokenPurpose] = mapped_column(_enum(TokenPurpose, "token_purpose"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+
     user: Mapped[User] = relationship()
 
 
@@ -105,6 +129,40 @@ class Deal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     documents: Mapped[list[Document]] = relationship(back_populates="deal", cascade="all, delete-orphan")
     claims: Mapped[list[Claim]] = relationship(back_populates="deal", cascade="all, delete-orphan")
     scenarios: Mapped[list[Scenario]] = relationship(back_populates="deal", cascade="all, delete-orphan")
+
+
+class DealMember(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A collaborator on a deal. user_id stays empty until the invitation is accepted by an account whose
+    email matches invited_email; get_deal only resolves accepted rows."""
+
+    __tablename__ = "deal_members"
+    __table_args__ = (UniqueConstraint("deal_id", "invited_email", name="uq_deal_member_email"),)
+    deal_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    invited_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    role: Mapped[MemberRole] = mapped_column(_enum(MemberRole, "member_role"), nullable=False)
+    invited_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    deal: Mapped[Deal] = relationship()
+    user: Mapped[User | None] = relationship(foreign_keys=[user_id])
+
+
+class Purchase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A Stripe Checkout purchase. Created pending when the session is opened; the webhook marks it paid."""
+
+    __tablename__ = "purchases"
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[PurchaseKind] = mapped_column(_enum(PurchaseKind, "purchase_kind"), nullable=False)
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    status: Mapped[PurchaseStatus] = mapped_column(
+        _enum(PurchaseStatus, "purchase_status"), default=PurchaseStatus.PENDING, nullable=False
+    )
+    stripe_session_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    stripe_payment_intent: Mapped[str | None] = mapped_column(String(255))
+    deal_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("deals.id", ondelete="SET NULL"))
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Document(UUIDPrimaryKeyMixin, TimestampMixin, Base):

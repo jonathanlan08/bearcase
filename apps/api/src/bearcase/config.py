@@ -130,6 +130,26 @@ class Settings(BaseSettings):
     )
     fixtures_dir: Path = REPO_ROOT / "fixtures" / "northstar-hvac"
 
+    # Transactional email (verification, password reset, deal invitations). "console" logs each message and
+    # keeps the last fifty in memory for tests; "resend" posts to the Resend API. Links point at app_base_url.
+    email_provider: Literal["console", "resend"] = "console"
+    email_from: str = Field(default="BearCase <no-reply@bearcase.invalid>", description="From header for every message.")
+    resend_api_key: str | None = Field(default=None, validation_alias=AliasChoices("BEARCASE_RESEND_API_KEY", "RESEND_API_KEY"))
+    app_base_url: str = Field(default="http://localhost:3000", description="Public origin of the web app; used in email links.")
+
+    # Per-user chat budget: assistant answers per calendar month (UTC), across every deal the user asked in.
+    chat_monthly_request_limit: int = Field(default=300, ge=1, description="Assistant answers per user per month.")
+
+    # Bounded paid pilot through Stripe Checkout. Unset keys leave /api/billing/checkout answering 503.
+    stripe_secret_key: str | None = Field(
+        default=None, validation_alias=AliasChoices("BEARCASE_STRIPE_SECRET_KEY", "STRIPE_SECRET_KEY")
+    )
+    stripe_webhook_secret: str | None = Field(
+        default=None, validation_alias=AliasChoices("BEARCASE_STRIPE_WEBHOOK_SECRET", "STRIPE_WEBHOOK_SECRET")
+    )
+    pilot_price_cents: int = Field(default=50000, ge=50, description="Price of the pilot in the smallest currency unit.")
+    pilot_currency: str = Field(default="usd", min_length=3, max_length=3)
+
     @model_validator(mode="after")
     def _quiet_limiter_in_tests(self) -> Settings:
         # The test suite shares one client address and would exhaust any budget. A test that exercises the
@@ -211,6 +231,13 @@ def production_warnings(settings: Settings) -> list[str]:
         warnings.append("BEARCASE_RATE_LIMIT_ENABLED is off: upload, processing, and model-calling routes are unmetered")
     if len(settings.secret_key) < 32:
         warnings.append("BEARCASE_SECRET_KEY is shorter than 32 characters; use 32 or more")
+    if settings.email_provider == "console":
+        warnings.append(
+            "BEARCASE_EMAIL_PROVIDER=console prints verification, reset, and invitation emails to the log instead of "
+            "delivering them; set it to resend with RESEND_API_KEY"
+        )
+    if "localhost" in settings.app_base_url or "127.0.0.1" in settings.app_base_url:
+        warnings.append(f"BEARCASE_APP_BASE_URL is {settings.app_base_url}; links in emails will point at a local address")
     return warnings
 
 

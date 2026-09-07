@@ -70,9 +70,31 @@ Free-tier facts to plan around (check Render's current terms; they change): the 
    - `NEXT_PUBLIC_SITE_URL=https://your-project.vercel.app`
    - `NEXT_PUBLIC_GITHUB_URL=https://github.com/you/bearcase`
 4. Deploy, then open `/demo` on the Vercel URL.
-5. Back in Render, set `BEARCASE_CORS_ORIGINS` to `["https://your-project.vercel.app"]` (a JSON list, no trailing slash); the service restarts.
+5. Back in Render, set `BEARCASE_CORS_ORIGINS` to `["https://your-project.vercel.app"]` (a JSON list, no trailing slash) and `BEARCASE_APP_BASE_URL` to `https://your-project.vercel.app`, the origin that verification, password-reset, and invite emails link to; the service restarts.
 
 Two things to confirm on your deployment rather than assume: that a chat reply streams (text appears while it is generated) through the Vercel proxy rather than arriving in one piece, and that the first demo start after Render has spun down succeeds once the API is awake (retry if it fails). Before sign-in, rate limits are by client address; through the Vercel proxy every visitor reaches Render from Vercel's addresses, so demo start, sign-in, and registration share one budget per proxy address (`BEARCASE_RATE_LIMIT_PER_MINUTE`, 60 by default). After sign-in, including demo visitors, limits are per user and unaffected.
+
+### 4. Email: console or Resend
+
+Registration, password reset, and deal invitations send an email through `bearcase/email/`. The default `BEARCASE_EMAIL_PROVIDER=console` writes the message to the API log (the link included) and keeps the last 50 in memory; that is enough for a demo, for development, and for tests, and it means a deployment with no email service still works: an operator can copy a verification link out of the Render log for a tester. For real users switch to Resend:
+
+1. Create a [Resend](https://resend.com) account, add and verify a sending domain you control (Resend gives you the DNS records), and create an API key.
+2. On the API service set `BEARCASE_EMAIL_PROVIDER=resend`, `BEARCASE_RESEND_API_KEY` (as a secret, `sync: false` in the Blueprint), and `BEARCASE_EMAIL_FROM` to a sender on that domain, for example `BearCase <no-reply@yourdomain.com>`; the default `no-reply@bearcase.invalid` is a reserved domain that Resend will refuse.
+3. Confirm `BEARCASE_APP_BASE_URL` is the Vercel origin (step 3.5). Links are built from this setting, never from the request, so a wrong value produces emails that point at localhost.
+4. Register a test account on the deployment and check that the verification email arrives and that `/verify?token=...` reports the account verified; then try "Forgot password" on `/forgot`.
+
+`ResendEmailer` posts to `https://api.resend.com/emails` with httpx; a failed send is logged and reported to the caller as a plain error, and no key is ever printed. Without a verified address an account can still sign in and work on its own deals; it cannot share a deal until it verifies.
+
+### 5. Stripe Checkout for the bounded pilot
+
+The `/pilot` page sells the per-deal pilot from `docs/go-to-market.md` through Stripe Checkout; the API never handles card details. Until both keys are set the page says checkout is not enabled and `POST /api/billing/checkout` answers 503, so a deployment without Stripe is fine.
+
+1. In the [Stripe dashboard](https://dashboard.stripe.com/apikeys), start in **test mode** and copy the secret key (`sk_test_...`) into `BEARCASE_STRIPE_SECRET_KEY` on the API service (a secret, `sync: false`).
+2. Under **Developers → Webhooks** add an endpoint with the URL `https://bearcase-api.onrender.com/api/billing/webhook` (the Render URL, not the Vercel one: the webhook is a server-to-server call and does not go through the Next.js rewrite) and subscribe it to `checkout.session.completed`. Copy the endpoint's signing secret (`whsec_...`) into `BEARCASE_STRIPE_WEBHOOK_SECRET`.
+3. The price is `BEARCASE_PILOT_PRICE_CENTS` (50000, so $500.00) in `BEARCASE_PILOT_CURRENCY` (`usd`); there is no Stripe Product or Price object to create, the session is built with inline price data from these settings. Checkout returns to `{BEARCASE_APP_BASE_URL}/pilot?status=success&session_id=...` or `.../pilot?status=cancelled`.
+4. Test it with Stripe's test card `4242 4242 4242 4242`: `GET /api/billing/status` should list the purchase as `pending` after the redirect and `paid` once the webhook has been delivered (the dashboard shows each delivery and its response code). Then switch both keys to live mode.
+
+Locally, Stripe's CLI (`stripe listen --forward-to localhost:8000/api/billing/webhook`) prints a temporary `whsec_...` to use as the webhook secret. Tests never reach Stripe: the SDK is wrapped in an adapter with a fake implementation.
 
 ### Updating
 
@@ -111,6 +133,14 @@ Every setting is a `BEARCASE_*` variable read from the environment or the repo-r
 | `BEARCASE_MAX_DOCUMENTS_PER_DEAL` / `BEARCASE_MAX_STORAGE_BYTES_PER_USER` | `50` / 500 MB | Storage quotas |
 | `BEARCASE_SESSION_TTL_HOURS` | `336` | 14 days |
 | `BEARCASE_DEMO_RETENTION_DAYS` | `14` | Demo visitors, their deals, and their files are deleted this long after their newest session expired |
+| `BEARCASE_APP_BASE_URL` | `http://localhost:3000` | The web app's public origin, no trailing slash; verification (`/verify`), reset (`/reset`), and invite (`/invite`) links and the Stripe return URLs (`/pilot`) are built from it |
+| `BEARCASE_EMAIL_PROVIDER` | `console` | `console` logs each email and keeps the last 50 in memory; `resend` sends through Resend and needs the two settings below |
+| `BEARCASE_EMAIL_FROM` | `BearCase <no-reply@bearcase.invalid>` | Sender address; with `resend` it must be on a domain verified in Resend |
+| `BEARCASE_RESEND_API_KEY` | unset | Resend API key, required for `resend`; a secret |
+| `BEARCASE_CHAT_MONTHLY_REQUEST_LIMIT` | `300` | Assistant answers per user per calendar month (UTC), counted across every deal the user asked in, demo visitors included; the chat answers 429 with the reset date beyond it |
+| `BEARCASE_STRIPE_SECRET_KEY` | unset | Stripe secret key (`sk_test_...` or `sk_live_...`); with it unset billing reports `configured: false` and checkout answers 503 |
+| `BEARCASE_STRIPE_WEBHOOK_SECRET` | unset | Signing secret of the webhook endpoint `{api}/api/billing/webhook` subscribed to `checkout.session.completed` |
+| `BEARCASE_PILOT_PRICE_CENTS` / `BEARCASE_PILOT_CURRENCY` | `50000` / `usd` | The bounded pilot's price in the smallest currency unit, and its currency |
 | `BEARCASE_FIXTURES_DIR` | `fixtures/northstar-hvac` | The Docker image sets `/app/fixtures/northstar-hvac` |
 | Web: `BEARCASE_API_URL` | `http://127.0.0.1:8000` | Where the Next.js rewrite sends `/api/*`; read at build time |
 | Web: `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_GITHUB_URL` | localhost, a placeholder | Canonical URL and the `/github` redirect |
@@ -134,8 +164,9 @@ The API never returns or logs a key, and `bearcase doctor` names the backend by 
 None of this exists yet; `SECURITY.md` has the full list of gaps, these are the ones that decide whether you can charge for it:
 
 - A shared rate limiter (Redis or the database) so more than one API instance can run; today each instance keeps its own buckets and the Blueprint pins one instance.
-- Email verification and password reset; accounts today are an email and an Argon2 hash with no recovery path.
+- Account deletion and owner transfer; verification, password reset, and sharing with up to five collaborators exist, but an account and its deals can only be removed by an operator.
 - Backups and restore drills for PostgreSQL and object storage, and retention plus deletion for documents outside the demo (documents cannot be deleted through the API).
 - Monitoring and alerting: uptime, error rate, provider latency and 429s, and shipping of the audit log; today there is a health endpoint and the process log.
 - Ingress body-size limits, parser CPU and memory bounds, a CSRF token, a dependency CVE scan in CI, and an external penetration test.
-- A per-customer model budget or key so one tenant's chat cannot spend another's quota.
+- Cost control beyond the per-user monthly answer count (`BEARCASE_CHAT_MONTHLY_REQUEST_LIMIT`): a per-customer key or a spend cap in currency, so one tenant's chat cannot exhaust the operator's provider quota within the month.
+- Invoicing, refunds, and subscriptions: Stripe Checkout takes the per-deal pilot fee and the webhook records it; nothing else about money is automated.

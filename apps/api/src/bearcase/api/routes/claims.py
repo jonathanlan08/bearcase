@@ -6,7 +6,7 @@ from decimal import Decimal
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
-from bearcase.api.deps import DbDep, DealDep, UserDep
+from bearcase.api.deps import DbDep, DealDep, EditorDealDep, UserDep
 from bearcase.api.routes.deals import effective_status
 from bearcase.api.schemas import ClaimDetailOut, ClaimOut, DecisionOut, EvidenceOut, LinkOut, MetricOut, ReviewRequest
 from bearcase.audit import record
@@ -103,7 +103,7 @@ def get_claim(deal: DealDep, claim_id: uuid.UUID, db: DbDep) -> ClaimDetailOut:
 
 
 @router.post("/deals/{deal_id}/claims/{claim_id}/review", response_model=ClaimDetailOut)
-def review_claim(deal: DealDep, claim_id: uuid.UUID, body: ReviewRequest, db: DbDep, user: UserDep) -> ClaimDetailOut:
+def review_claim(deal: EditorDealDep, claim_id: uuid.UUID, body: ReviewRequest, db: DbDep, user: UserDep) -> ClaimDetailOut:
     c = db.scalar(select(Claim).where(Claim.id == claim_id, Claim.deal_id == deal.id))
     if c is None:
         raise HTTPException(404, "Claim not found.")

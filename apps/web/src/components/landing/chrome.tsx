@@ -51,7 +51,7 @@ export function SiteNav() {
 export function SiteFooter() {
   return (
     <footer className="border-t border-hairline">
-      <div className="mx-auto grid max-w-[1200px] gap-10 px-6 py-14 md:grid-cols-3 lg:px-10">
+      <div className="mx-auto grid max-w-[1200px] gap-10 px-6 py-14 md:grid-cols-4 lg:px-10">
         <div>
           <Wordmark />
           <p className="mt-3 max-w-xs text-sm text-fg-muted">Checks a seller&apos;s documents for financial inconsistencies and shows you what to investigate before you buy the business. Open source, MIT licensed.</p>
@@ -64,6 +64,14 @@ export function SiteFooter() {
             <li><Link href="/methodology" className="hover:underline">Methodology</Link></li>
             <li><Link href="/trust" className="hover:underline">How we handle your documents</Link></li>
             <li><a href={GITHUB} className="hover:underline" target="_blank" rel="noreferrer">View on GitHub</a></li>
+          </ul>
+        </div>
+        <div>
+          <p className="text-sm font-semibold">Working with us</p>
+          <ul className="mt-3 flex flex-col gap-2 text-sm">
+            <li><Link href="/pilot" className="hover:underline">The bounded pilot</Link></li>
+            <li><Link href="/terms" className="hover:underline">Terms of use</Link></li>
+            <li><Link href="/privacy" className="hover:underline">Privacy</Link></li>
           </ul>
         </div>
         <div>

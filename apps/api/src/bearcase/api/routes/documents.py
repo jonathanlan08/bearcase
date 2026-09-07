@@ -6,7 +6,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Query, Response, UploadFile
 from sqlalchemy import delete, func, select, update
 
-from bearcase.api.deps import DbDep, DealDep, UserDep
+from bearcase.api.deps import DbDep, DealDep, EditorDealDep, UserDep
 from bearcase.api.schemas import DocumentOut, EvidenceOut, JobOut, ProcessResponse, VersionOut
 from bearcase.audit import record
 from bearcase.chat.brief import invalidate_brief
@@ -115,7 +115,7 @@ _STATUS_BY_CODE = {"too_large": 413, "storage_limit": 413, "document_limit": 400
 
 @router.post("/deals/{deal_id}/documents", response_model=list[DocumentOut], status_code=201)
 async def upload_documents(
-    deal: DealDep, db: DbDep, user: UserDep, files: list[UploadFile], process: bool = True
+    deal: EditorDealDep, db: DbDep, user: UserDep, files: list[UploadFile], process: bool = True
 ) -> list[DocumentOut]:
     s = get_settings()
     per_file_limit = f"{s.max_upload_bytes // (1024 * 1024)} MB"
@@ -219,7 +219,7 @@ def document_evidence(
 
 
 @router.post("/deals/{deal_id}/documents/{document_id}/reprocess", response_model=ProcessResponse, status_code=202)
-def reprocess_document(deal: DealDep, document_id: uuid.UUID, db: DbDep, user: UserDep) -> ProcessResponse:
+def reprocess_document(deal: EditorDealDep, document_id: uuid.UUID, db: DbDep, user: UserDep) -> ProcessResponse:
     doc = db.scalar(select(Document).where(Document.id == document_id, Document.deal_id == deal.id))
     if doc is None:
         raise HTTPException(404, "Document not found.")
@@ -289,7 +289,7 @@ def get_evidence(deal: DealDep, evidence_id: uuid.UUID, db: DbDep, user: UserDep
 
 
 @router.delete("/deals/{deal_id}/documents/{document_id}", status_code=204)
-def delete_document(deal: DealDep, document_id: uuid.UUID, db: DbDep, user: UserDep) -> Response:
+def delete_document(deal: EditorDealDep, document_id: uuid.UUID, db: DbDep, user: UserDep) -> Response:
     """Remove a document with everything derived from it: its versions and stored files, its evidence, the
     claims extracted from it (with their links, reviewer decisions, and findings), and the findings that cite
     its evidence. Children are deleted explicitly, in dependency order, so the result does not depend on the

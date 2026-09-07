@@ -15,6 +15,7 @@ from bearcase import __version__
 from bearcase.api.routes import (
     audit,
     auth,
+    billing,
     chat,
     claims,
     deals,
@@ -23,6 +24,7 @@ from bearcase.api.routes import (
     financials,
     health,
     insights,
+    members,
     questions,
     questions_seller,
     reports,
@@ -108,6 +110,8 @@ def create_app() -> FastAPI:
         questions_seller.router,
         insights.router,
         chat.router,
+        members.router,
+        billing.router,
     ):
         app.include_router(router, prefix="/api")
     return app

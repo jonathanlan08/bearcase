@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useLocalFlag } from "@/lib/hooks";
 import { FolderOpen, ListChecks, Calculator, FlaskConical, FileText, MessageCircleQuestionMark, LayoutDashboard, History, PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, MoreHorizontal, ShieldCheck } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { api, auth, errorDetail } from "@/lib/api";
 import { useDeal, useDeals, qk } from "@/components/app/hooks";
 import { useMe } from "@/components/app/gate";
 import { Wordmark } from "@/components/ui/primitives";
@@ -102,6 +103,13 @@ export function DealShell({ children }: { children: React.ReactNode }) {
           )}
           {!collapsed && deal.data?.is_demo && <p className="text-[11px] leading-snug text-fg-muted">Northstar HVAC is fictional. Not financial, legal, tax, or investment advice.</p>}
           <Link href="/trust" className="flex h-8 items-center gap-2 rounded-[var(--radius-1)] px-1 text-xs text-fg-muted hover:bg-bg-muted hover:text-fg" title={collapsed ? "Trust & data" : undefined} aria-label={collapsed ? "Trust & data" : undefined}><ShieldCheck size={14} />{!collapsed && "Trust & data"}</Link>
+          {!collapsed && (
+            <p className="flex flex-wrap gap-x-2 px-1 text-[11px] text-fg-muted">
+              <Link href="/pilot" className="hover:text-fg hover:underline">Pilot</Link>
+              <Link href="/terms" className="hover:text-fg hover:underline">Terms</Link>
+              <Link href="/privacy" className="hover:text-fg hover:underline">Privacy</Link>
+            </p>
+          )}
           <button type="button" onClick={logout} className="flex h-8 items-center gap-2 rounded-[var(--radius-1)] px-1 text-xs text-fg-muted hover:bg-bg-muted" title="Sign out" aria-label={collapsed ? "Sign out" : undefined}><LogOut size={14} />{!collapsed && (me.data?.display_name ?? "Sign out")}</button>
         </div>
       </aside>
@@ -120,11 +128,15 @@ export function DealShell({ children }: { children: React.ReactNode }) {
                 <DropdownMenu.Item asChild><Link href="/app/deals/new" className={MENU_ITEM}>Create a deal…</Link></DropdownMenu.Item>
                 <DropdownMenu.Item asChild><Link href="/app" className={MENU_ITEM}>All deals</Link></DropdownMenu.Item>
                 <DropdownMenu.Item asChild><Link href="/trust" className={MENU_ITEM}>Trust &amp; data</Link></DropdownMenu.Item>
+                <DropdownMenu.Item asChild><Link href="/pilot" className={MENU_ITEM}>Pilot</Link></DropdownMenu.Item>
+                <DropdownMenu.Item asChild><Link href="/terms" className={MENU_ITEM}>Terms</Link></DropdownMenu.Item>
+                <DropdownMenu.Item asChild><Link href="/privacy" className={MENU_ITEM}>Privacy</Link></DropdownMenu.Item>
                 <DropdownMenu.Item asChild><button type="button" onClick={logout} className={`${MENU_ITEM} w-full text-left`}>Sign out{me.data?.display_name ? ` (${me.data.display_name})` : ""}</button></DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
         </header>
+        {me.data && !me.data.is_demo && !me.data.email_verified && <VerifyBanner email={me.data.email} />}
         <main id="main" className={`flex-1 ${MAIN_PAD}`}>{children}</main>
         <div className={CHAT_TRIGGER_OFFSET}><DealChat dealId={dealId} /></div>
         <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-6 border-t border-hairline bg-bg-raised pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Primary">
@@ -135,6 +147,23 @@ export function DealShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
       </div>
+    </div>
+  );
+}
+
+/** Shown to a signed-in account whose address is not verified yet: sharing a deal needs it. Resend is one click; the reply is worded here. */
+export function VerifyBanner({ email }: { email: string }) {
+  const [note, setNote] = useState<string | null>(null);
+  const resend = useMutation({
+    mutationFn: () => auth.resendVerification(),
+    onSuccess: () => setNote(`A new link is on its way to ${email}.`),
+    onError: (e) => setNote(errorDetail(e, "The link could not be sent. Try again in a minute.")),
+  });
+  return (
+    <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline bg-bg-muted px-4 py-2 text-xs md:px-6">
+      <span><span aria-hidden>▲ </span>Your email address is not verified. Open the link we sent to <span className="font-medium">{email}</span> to share deals.</span>
+      <button type="button" onClick={() => resend.mutate()} disabled={resend.isPending} className="font-medium text-accent underline-offset-2 hover:underline disabled:opacity-50">Resend the link</button>
+      {note && <span className="text-fg-muted">{note}</span>}
     </div>
   );
 }

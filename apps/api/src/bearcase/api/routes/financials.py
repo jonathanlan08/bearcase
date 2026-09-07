@@ -6,7 +6,7 @@ from decimal import Decimal
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
-from bearcase.api.deps import DbDep, DealDep, UserDep
+from bearcase.api.deps import DbDep, DealDep, EditorDealDep, UserDep
 from bearcase.api.schemas import AdjustmentDecisionRequest, AdjustmentOut, FinancialsOut, MetricOut, PeriodOut, WaterfallStep
 from bearcase.audit import record
 from bearcase.chat.brief import invalidate_brief
@@ -73,7 +73,7 @@ def get_financials(deal: DealDep, db: DbDep) -> FinancialsOut:
 
 @router.post("/deals/{deal_id}/adjustments/{adjustment_id}/decision", response_model=FinancialsOut)
 def decide_adjustment(
-    deal: DealDep, adjustment_id: uuid.UUID, body: AdjustmentDecisionRequest, db: DbDep, user: UserDep
+    deal: EditorDealDep, adjustment_id: uuid.UUID, body: AdjustmentDecisionRequest, db: DbDep, user: UserDep
 ) -> FinancialsOut:
     """Human decision on an add-back. The rule-based decision stays in the audit payload; verified EBITDA is recomputed."""
     a = db.scalar(select(Adjustment).where(Adjustment.id == adjustment_id, Adjustment.deal_id == deal.id))

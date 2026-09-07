@@ -455,7 +455,7 @@ def test_config_explains_unready_explicit_provider(client, demo, monkeypatch: py
 
 def test_config_in_mock_mode_has_contract_shape(client, demo, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
     cfg = client.get(f"/api/deals/{demo['id']}/chat/config").json()
-    assert set(cfg) == {"provider", "label", "model", "live", "note", "suggested", "models", "picker", "options"}
+    assert set(cfg) == {"provider", "label", "model", "live", "note", "suggested", "models", "picker", "options", "budget"}
     # the test suite pins BEARCASE_CHAT_PROVIDER=mock, which gets the explicit-selection note
     assert cfg["provider"] == "mock" and cfg["live"] is False and "rule-based composer" in cfg["note"]
     assert cfg["models"] == ["rules-v1"] and cfg["picker"] is False and len(cfg["suggested"]) == 6

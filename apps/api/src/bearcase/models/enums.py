@@ -204,3 +204,24 @@ class ReviewAction(StrEnum):
     REJECT = "reject"
     CORRECT = "correct"
     UNDO = "undo"
+
+
+class TokenPurpose(StrEnum):
+    VERIFY = "verify"
+    RESET = "reset"
+    INVITE = "invite"
+
+
+class MemberRole(StrEnum):
+    VIEWER = "viewer"
+    EDITOR = "editor"
+
+
+class PurchaseKind(StrEnum):
+    PILOT = "pilot"
+
+
+class PurchaseStatus(StrEnum):
+    PENDING = "pending"
+    PAID = "paid"
+    FAILED = "failed"

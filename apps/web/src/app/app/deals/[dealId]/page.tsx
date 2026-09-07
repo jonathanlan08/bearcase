@@ -11,6 +11,7 @@ import { SeverityChip, StatusGlyph, STATUS_LABEL } from "@/components/domain/sta
 import { fmtMoney, fmtX, fmtDate, titleCase } from "@/lib/format";
 import { useToast } from "@/components/ui/toast";
 import { askTheDeal } from "@/lib/chat-bus";
+import { ShareButton } from "@/components/domain/share-panel";
 import type { Finding, ProgressKey } from "@/lib/api";
 
 const ORDER = ["supported", "contradicted", "review_required", "unsupported"] as const;
@@ -169,6 +170,7 @@ export default function OverviewPage() {
       <PageHeader kicker={kicker} title="Deal overview" actions={
         <>
           {running && <span className="text-xs font-medium text-amber" aria-live="polite">{d.active_jobs} job{d.active_jobs > 1 ? "s" : ""} running…</span>}
+          {!d.deal.is_demo && <ShareButton dealId={dealId} />}
           <Button variant="secondary" size="sm" onClick={() => runAnalysis(true)} loading={process.isPending} disabled={noDocs}>Re-run analysis</Button>
         </>
       } />

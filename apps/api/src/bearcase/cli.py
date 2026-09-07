@@ -171,6 +171,9 @@ def doctor_rows() -> list[DoctorRow]:
         s.groq_api_key,
         s.openrouter_api_key,
         s.chat_api_key,
+        s.resend_api_key,
+        s.stripe_secret_key,
+        s.stripe_webhook_secret,
     ]
 
     rows.append(DoctorRow("env", "ok", s.env))
@@ -290,6 +293,34 @@ def doctor_rows() -> list[DoctorRow]:
             f"{_mb(s.max_storage_bytes_per_user)} per user, demo data kept {s.demo_retention_days} days",
         )
     )
+
+    # Email: verification, reset, and invitation links; the console emailer only logs them.
+    from bearcase.email import email_status
+
+    email_state, email_detail = email_status(s)
+    rows.append(DoctorRow("email", email_state, email_detail))  # type: ignore[arg-type]
+
+    # Billing: the pilot checkout answers 503 until a Stripe key is set; the webhook also needs its secret.
+    price = f"{s.pilot_price_cents / 100:,.2f} {s.pilot_currency.upper()}"
+    if s.stripe_secret_key and s.stripe_webhook_secret:
+        rows.append(DoctorRow("billing", "ok", f"Stripe Checkout, pilot {price}; webhook secret set"))
+    elif s.stripe_secret_key:
+        rows.append(
+            DoctorRow(
+                "billing",
+                "warn",
+                f"Stripe Checkout, pilot {price}; STRIPE_WEBHOOK_SECRET missing, so payments are never marked paid",
+            )
+        )
+    else:
+        rows.append(
+            DoctorRow(
+                "billing",
+                "warn" if s.env == "production" else "ok",
+                f"not configured (pilot {price}); /api/billing/checkout answers 503 until STRIPE_SECRET_KEY is set",
+            )
+        )
+    rows.append(DoctorRow("chat budget", "ok", f"{s.chat_monthly_request_limit} assistant answers per user per calendar month"))
 
     # CORS: the browser's Origin never carries a trailing slash, and localhost is only right in development.
     origins = ", ".join(s.cors_origins) or "(none)"

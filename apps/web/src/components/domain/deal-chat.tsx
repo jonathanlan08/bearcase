@@ -4,7 +4,7 @@ import { Component, useCallback, useEffect, useRef, useState, type ReactNode } f
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog } from "radix-ui";
 import { MessageSquareText, Plus, Send, Square, X, Trash2 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, type ChatBudget } from "@/lib/api";
 import { useLocalString, useModifierKey } from "@/lib/hooks";
 import { onChatPrompt, setChatOpen, takeChatPrompt, toggleChat, useChatBus, resetChatBus } from "@/lib/chat-bus";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,18 @@ interface Thread { id: string; title: string; created_at: string; updated_at: st
 interface ThreadDetail extends Thread { messages: Msg[] }
 export interface ChatOption { provider: string; label: string; env: string; free_tier: boolean; free_tier_note: string; default_model: string; key_url: string; models?: string[] }
 /** `picker` is the server's opt-in for a model choice; without it the panel never names or offers a model. */
-export interface ChatConfig { provider: string; label: string; model: string; models?: string[]; picker?: boolean; live: boolean; note: string; suggested: string[]; options: ChatOption[] }
+export interface ChatConfig { provider: string; label: string; model: string; models?: string[]; picker?: boolean; live: boolean; note: string; suggested: string[]; options: ChatOption[]; budget?: ChatBudget }
+
+/** "{used} of {limit} answers used this month" for the empty state and the footer; null when the server sent no budget. */
+export function budgetLine(budget: ChatBudget | undefined): string | null {
+  if (!budget) return null;
+  return `${fmtInt(budget.used)} of ${fmtInt(budget.limit)} answers used this month`;
+}
+
+/** The API's monthly-budget refusal is a 429 without Retry-After and with its own sentence, which the panel shows as it is. */
+export function isBudgetExhausted(detail: string): boolean {
+  return /^You have used this month's/.test(detail);
+}
 
 /**
  * Companion prompts shown under the input whenever the assistant is not busy. The first two need the user's context
@@ -45,7 +56,7 @@ export function useChatConfig(dealId: string) {
 
 /** Provider throttling reads as "wait", not "broken": the review glyph instead of the error tone. */
 export function isRateLimit(message: string): boolean {
-  return /rate limit|too many requests/i.test(message);
+  return /rate limit|too many requests/i.test(message) || isBudgetExhausted(message);
 }
 
 const ACTION = "text-[11px] text-fg-muted underline-offset-2 hover:text-fg hover:underline";
@@ -164,6 +175,7 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
       if (!res.ok || !res.body) {
         const detail = await res.json().then((j: { detail?: unknown }) => (typeof j?.detail === "string" ? j.detail : "")).catch(() => "");
         const retry = res.headers.get("Retry-After");
+        if (res.status === 429 && isBudgetExhausted(detail)) throw new Error(detail);
         throw new Error(res.status === 429 ? `Too many requests. Try again in ${retry ?? "a few"} seconds.` : detail || `Request failed (${res.status})`);
       }
       const reader = res.body.getReader();
@@ -201,6 +213,8 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
       setBusy(false);
       abortRef.current = null;
       qc.invalidateQueries({ queryKey: ["chat-threads", dealId] });
+      // The budget count moved by one; the config row is otherwise static, so this is the only refetch it gets.
+      qc.invalidateQueries({ queryKey: ["chat-config", dealId] });
     }
   }, [busy, restoring, dealId, threadId, qc, live, model, defaultModel]);
 
@@ -223,6 +237,7 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
   const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
   const regenerate = lastUser && !busy ? () => send(lastUser.content) : undefined;
   const ready = !busy && !restoring;
+  const budget = budgetLine(config.data?.budget);
   return (
     <>
       <div className="flex h-14 items-center gap-3 border-b border-hairline px-4">
@@ -264,6 +279,7 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
                   {config.data && !live && <p className="mt-2 max-w-[46ch]">{config.data.note}</p>}
                   <p className="mt-2 max-w-[46ch]">Deal facts come from the claim ledger, verified metrics, add-back decisions, scenario runs, and the documents, each with a citation you can open. A citation shows where a figure came from, not that the whole answer is right, so open the sources before you rely on it. Everything else is answered as a general assistant.</p>
                   <StatementKindsLegend className="mt-3 max-w-[60ch]" />
+                  {budget && <p className="mt-3 text-xs">{budget}.</p>}
                 </div>
                 {config.data && !live && <ConnectModel options={config.data.options} />}
                 {config.data && (
@@ -289,7 +305,7 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
                 ))}
               </div>
             )}
-            <p className="mt-2 text-[11px] text-fg-muted">Enter to send, Shift+Enter for a new line. Not financial, legal, tax, or investment advice.</p>
+            <p className="mt-2 text-[11px] text-fg-muted">Enter to send, Shift+Enter for a new line. Not financial, legal, tax, or investment advice.{budget && <> {budget}.</>}</p>
           </div>
         </div>
       </div>

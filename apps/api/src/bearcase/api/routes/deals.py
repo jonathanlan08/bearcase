@@ -6,11 +6,23 @@ from decimal import Decimal
 from fastapi import APIRouter
 from sqlalchemy import func, select
 
-from bearcase.api.deps import DbDep, DealDep, UserDep
+from bearcase.api.deps import DbDep, DealDep, EditorDealDep, OwnerDealDep, UserDep, accepted_membership_ids
 from bearcase.api.schemas import DealCreate, DealListItem, DealOut, DealSummary, FindingOut, ProcessResponse
 from bearcase.audit import record
+from bearcase.auth import delete_deal_with_files
 from bearcase.config import get_settings
-from bearcase.models import Claim, Deal, Document, FinancialMetric, Finding, ProcessingJob, Report, ReviewDecision, Scenario
+from bearcase.models import (
+    Claim,
+    Deal,
+    DealMember,
+    Document,
+    FinancialMetric,
+    Finding,
+    ProcessingJob,
+    Report,
+    ReviewDecision,
+    Scenario,
+)
 from bearcase.models.enums import DocumentStatus, FindingKind, JobStatus, JobType, PurchasePriceBasis
 from bearcase.pipeline.jobs import dispatch, enqueue_job
 
@@ -27,7 +39,15 @@ def effective_status(claim: Claim) -> str:
 @router.get("", response_model=list[DealListItem])
 def list_deals(db: DbDep, user: UserDep) -> list[DealListItem]:
     out: list[DealListItem] = []
-    for deal in db.scalars(select(Deal).where(Deal.owner_id == user.id).order_by(Deal.updated_at.desc())):
+    roles: dict[uuid.UUID, str] = {
+        m.deal_id: m.role.value
+        for m in db.scalars(select(DealMember).where(DealMember.user_id == user.id, DealMember.accepted_at.is_not(None)))
+    }
+    for deal in db.scalars(
+        select(Deal)
+        .where((Deal.owner_id == user.id) | Deal.id.in_(accepted_membership_ids(user.id)))
+        .order_by(Deal.updated_at.desc())
+    ):
         docs = db.scalars(select(Document.status).where(Document.deal_id == deal.id)).all()
         counts: dict[str, int] = {}
         for c in db.scalars(select(Claim).where(Claim.deal_id == deal.id)):
@@ -37,6 +57,7 @@ def list_deals(db: DbDep, user: UserDep) -> list[DealListItem]:
         item.document_count = len(docs)
         item.documents_ready = sum(1 for s in docs if s == DocumentStatus.READY)
         item.claim_counts = counts
+        item.role = "owner" if deal.owner_id == user.id else ("editor" if roles.get(deal.id) == "editor" else "viewer")
         out.append(item)
     return out
 
@@ -145,7 +166,7 @@ def deal_summary(deal: DealDep, db: DbDep) -> DealSummary:
 
 
 @router.post("/{deal_id}/process", response_model=ProcessResponse, status_code=202)
-def process_deal(deal: DealDep, db: DbDep, user: UserDep, reprocess: bool = False) -> ProcessResponse:
+def process_deal(deal: EditorDealDep, db: DbDep, user: UserDep, reprocess: bool = False) -> ProcessResponse:
     """Queue document processing for every document that is not ready (or all, with reprocess), then deal analysis."""
     job_ids: list[uuid.UUID] = []
     for doc in db.scalars(select(Document).where(Document.deal_id == deal.id).order_by(Document.created_at)):
@@ -165,6 +186,21 @@ def process_deal(deal: DealDep, db: DbDep, user: UserDep, reprocess: bool = Fals
     db.commit()
     dispatch(job_ids)
     return ProcessResponse(job_ids=job_ids, message=f"Queued {len(job_ids)} jobs.")
+
+
+@router.delete("/{deal_id}", status_code=204)
+def delete_deal(deal: OwnerDealDep, db: DbDep, user: UserDep) -> None:
+    """Remove a deal with its documents, stored files, and memberships. Owner only."""
+    record(
+        db,
+        user_id=user.id,
+        event_type="deal.deleted",
+        object_type="deal",
+        object_id=deal.id,
+        summary=f"Deleted deal {deal.company_name}",
+    )
+    delete_deal_with_files(db, deal)
+    db.commit()
 
 
 @router.get("/{deal_id}/findings", response_model=list[FindingOut])

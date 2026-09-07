@@ -113,6 +113,8 @@ Price hypotheses, both to be tested in week 4, never both with the same person:
 
 Ask for payment before delivery. A pilot that will not pay is a conversation and goes in the conversation log as one.
 
+Taking the payment: the `/pilot` page of a deployment (linked from the landing page hero and footer) describes the offer, its limitations, and the price, and its "Start a pilot" button opens Stripe Checkout for the per-deal fee (`POST /api/billing/checkout`, optionally tied to one of the buyer's deals). The price and currency come from `BEARCASE_PILOT_PRICE_CENTS` and `BEARCASE_PILOT_CURRENCY` (defaults $500.00 USD, the per-deal hypothesis above); change the setting when the hypothesis changes rather than editing copy. The purchase is stored as `pending` when the session is created and marked `paid` by the signed Stripe webhook, and `GET /api/billing/status` lists the signed-in buyer's purchases, so "money received" in the plan above is a row with `status: paid`, not a screenshot. Until the Stripe keys are set the page explains that checkout is not enabled on this deployment and the route answers 503; the monthly team plan is not sold through the app yet. Setup is in `docs/deployment.md`; the Stripe test mode works end to end with test cards before any real charge.
+
 ## Cost tracking
 
 Track four costs per deal from the first pilot: model cost, document processing, storage, and founder support time. The first three come from `GET /api/deals/{id}/usage`:
