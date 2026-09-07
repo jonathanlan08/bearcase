@@ -30,7 +30,7 @@ No spring overshoot anywhere. Exits are ≤ 60% of the matching enter duration.
 
 ## Landing choreography (per section)
 
-- Hero: DOM copy reveals in the first 900ms (label → headline lines → support → CTAs); the scene runs its own stage timeline tied to scroll (see `3d-evidence-core.md`).
+- Hero: DOM copy reveals in the first 900ms (label → headline lines → support → CTAs); the scene runs its own stage timeline tied to scroll (see `3d-evidence-sculpture.md`).
 - Sections 2–6: label and H2 reveal first; figure choreography starts when 40% visible and plays once; interactive controls remain live afterwards.
 
 ## Reduced motion (`prefers-reduced-motion: reduce`)

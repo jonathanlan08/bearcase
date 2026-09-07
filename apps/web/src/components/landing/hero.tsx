@@ -6,11 +6,11 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { motion } from "motion/react";
 import { Pause, Play } from "lucide-react";
 import { buttonClass } from "@/components/ui/button";
-import { EvidenceCoreStatic } from "@/components/scene/static";
+import { EvidenceSculptureStatic } from "@/components/scene/static";
 import { CHAPTERS, chapterIndex, createSceneStore } from "@/components/scene/storyboard";
 import { useLocalFlag, useMediaQuery } from "@/lib/hooks";
 
-const EvidenceCoreScene = dynamic(() => import("@/components/scene/evidence-core").then((m) => m.EvidenceCoreScene), { ssr: false });
+const EvidenceSculptureScene = dynamic(() => import("@/components/scene/evidence-sculpture").then((m) => m.EvidenceSculptureScene), { ssr: false });
 
 /** localStorage key for the visitor's "Pause 3D" preference (`"1"` = paused). Read through `useLocalFlag`. */
 export const SCENE_PAUSED_KEY = "bc.scene.paused";
@@ -115,11 +115,11 @@ export function Hero() {
       <div ref={stickyRef} className="sticky top-0 h-svh overflow-hidden">
         {/* Scene layer: mounted only when the visitor can and wants to run it; unmounting stops the render loop and frees the GPU context. */}
         <div className={`absolute inset-0 transition-opacity duration-700 ${showScene ? "opacity-100" : "opacity-0"}`} aria-hidden={!showScene}>
-          {interactive && <EvidenceCoreScene story={store} mobile={mobile} onReady={() => setReady(true)} onFail={() => setFailed(true)} />}
+          {interactive && <EvidenceSculptureScene story={store} mobile={mobile} onReady={() => setReady(true)} onFail={() => setFailed(true)} />}
         </div>
         {/* Static layer: the LCP image, the reduced-motion and no-WebGL version, and the paused view. Pointer events pass through to the scene when it is showing. */}
         <div className={`absolute inset-0 transition-opacity duration-700 ${showScene ? "pointer-events-none opacity-0" : "opacity-100"}`} aria-hidden={showScene}>
-          <EvidenceCoreStatic align={wide ? "right" : "center"} />
+          <EvidenceSculptureStatic align={wide ? "right" : "center"} />
         </div>
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(7,8,10,0.6)_0%,rgba(7,8,10,0)_22%,rgba(7,8,10,0)_44%,rgba(7,8,10,0.72)_62%,rgba(7,8,10,0.96)_82%)] lg:bg-[linear-gradient(90deg,rgba(7,8,10,0.94)_0%,rgba(7,8,10,0.8)_34%,rgba(7,8,10,0.06)_56%,transparent)]" aria-hidden />
         {/* Copy layer. `pointer-events-none` so parallax, drag, and node hover reach the canvas; the text and controls opt back in. */}

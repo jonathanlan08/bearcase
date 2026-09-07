@@ -1,4 +1,4 @@
-/* Visual check for the Evidence Core hero against a running dev server (default http://localhost:3000).
+/* Visual check for the Evidence Sculpture hero against a running dev server (default http://localhost:3000).
  *
  *   node scripts/scene-check.mjs                 # desktop 1440×900
  *   SCENE_VIEWPORT=390x844 node scripts/scene-check.mjs

@@ -130,6 +130,7 @@ def test_seller_questions_are_deterministic_and_reader_ready(owner):
     data = first.json()
     qs = data["questions"]
     assert len(qs) >= 8 and data["generated_from"]["findings"] >= 8 and data["generated_from"]["claims"] >= 5
+    assert len(qs) == 21, "the landing page states this count (apps/web/src/app/page.tsx DEMO.questions); update both"
     for q in qs:
         assert set(q) == QUESTION_KEYS, q
         assert q["kind"] in KINDS and q["severity"] in SEVERITY_RANK

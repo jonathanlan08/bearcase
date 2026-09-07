@@ -12,7 +12,7 @@ The workflow is one path: upload documents, see the important discrepancies, ins
 
 > The included Northstar HVAC deal is entirely fictional. BearCase is an educational prototype and does not provide financial, legal, tax, or investment advice. Do not upload confidential documents to a public deployment yet; see [Limits](#limits).
 
-![Landing page: the Evidence Core hero](docs/screenshots/01-landing-hero.png)
+![Landing page: the Evidence Sculpture hero](docs/screenshots/01-landing-hero.png)
 
 ## What you can answer in a first session
 

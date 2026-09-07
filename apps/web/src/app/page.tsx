@@ -3,6 +3,7 @@ import Link from "next/link";
 import { SiteNav, SiteFooter } from "@/components/landing/chrome";
 import { Hero } from "@/components/landing/hero";
 import { ClaimEvidenceFigure, ContradictionFigure, ReportFigure, ScenarioFigure, WaterfallFigure } from "@/components/landing/figures";
+import { PilotOffer } from "@/components/landing/pilot-offer";
 import { buttonClass } from "@/components/ui/button";
 import snapshot from "@/content/northstar-snapshot.json";
 import { fmtMoney, fmtX } from "@/lib/format";
@@ -15,6 +16,13 @@ export const metadata: Metadata = {
 /** Demo facts come from the committed Northstar snapshot, the same file the figures render from, so the copy cannot drift from the figures. */
 const S = snapshot;
 const scenarios = Object.values(S.scenarios);
+/** Three questions from the fictional Northstar deal, copied from the seller-questions export the demo produces. */
+const SAMPLE_QUESTIONS = [
+  { severity: "critical", question: "In our downside scenario the cash flow does not cover the loan payments the lender requires. What signed renewals, backlog, or cost commitments for next year can you share?", sources: [] as string[] },
+  { severity: "high", question: "The CIM says revenue has grown at approximately 18% annually since FY2022, but the financial statements show a revenue CAGR of 11.6%. Which figure should we rely on, and what explains the difference?", sources: ["northstar-cim.pdf", "northstar-financial-statements.xlsx"] },
+  { severity: "high", question: "The CIM says no single customer represents more than 10% of revenue, but the customer revenue file shows the largest customer at 22.0%. Please confirm the concentration and the term of that contract.", sources: ["northstar-cim.pdf", "northstar-customer-revenue.csv"] },
+];
+
 const DEMO = {
   headlineClaims: S.claims.length,
   contradicted: S.claims.filter((c) => c.status === "contradicted").length,
@@ -24,6 +32,7 @@ const DEMO = {
   sellerEbitda: fmtMoney(S.ebitda.seller, { compact: true }),
   verifiedEbitda: fmtMoney(S.ebitda.verified, { compact: true }),
   covenant: fmtX(S.deal.threshold),
+  questions: 21, // seller questions the Northstar demo exports; test_first_customer.py asserts this count
 };
 const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
 const word = (n: number) => WORDS[n] ?? String(n);
@@ -149,7 +158,36 @@ export default function LandingPage() {
                 <Link href="/app" className={buttonClass("secondary", "md", "h-11 px-5")}>Sign in or create an account</Link>
               </div>
               <p className="mt-4 text-sm text-fg-muted">Try a fictional deal. No account or API key needed. <Link href="/trust" className="underline underline-offset-2 hover:text-fg">How we handle your documents</Link>.</p>
-              <p className="mt-8 max-w-[560px] text-sm text-fg-muted">Northstar HVAC is fictional. BearCase is an educational prototype and does not provide financial, legal, tax, or investment advice.</p>
+              <p className="mt-8 max-w-[560px] text-sm text-fg-muted">Northstar HVAC is fictional. BearCase is a first-pass check, not a substitute for professional diligence, and does not provide financial, legal, tax, or investment advice.</p>
+            </div>
+          </div>
+        </section>
+
+        {/* What you receive: the deliverable itself, then the paid pilot. */}
+        <section className="content-auto border-t border-hairline" aria-labelledby="deliverable-heading">
+          <div className="mx-auto grid max-w-[1200px] gap-10 px-6 py-24 md:grid-cols-12 md:py-32 lg:px-10">
+            <div className="md:col-span-5">
+              <h2 id="deliverable-heading" className="text-3xl md:text-4xl">What you actually receive.</h2>
+              <p className="mt-4 text-[17px] leading-relaxed text-fg-muted">Two files, not a dashboard: a list of questions for the seller, each tied to the document that raised it, and a report whose every figure names its source. Below are three of the {word(DEMO.questions)} questions the fictional Northstar deal produces, exactly as exported.</p>
+              <p className="mt-6 text-sm text-fg-muted">The report opens with the checked financials and the contradictions, then the claim ledger, add-back decisions, scenarios, and the reviewer&apos;s notes on what was not checked.</p>
+              <div className="mt-8"><PilotOffer /></div>
+            </div>
+            <div className="md:col-span-7">
+              <figure className="rounded-[var(--radius-2)] border border-hairline bg-bg-raised p-6 md:p-8">
+                <figcaption className="micro text-fg-muted">seller-questions.md · excerpt</figcaption>
+                <ol className="mt-4 space-y-5 text-[15px] leading-relaxed">
+                  {SAMPLE_QUESTIONS.map((q, i) => (
+                    <li key={i} className="grid grid-cols-[auto_1fr] gap-x-3">
+                      <span className="num pt-0.5 text-sm text-fg-muted">{i + 1}.</span>
+                      <div>
+                        <p><span className={`micro mr-2 ${q.severity === "critical" ? "text-red" : "text-amber"}`}>{q.severity}</span>{q.question}</p>
+                        <p className="mt-1 font-mono text-[12px] text-fg-muted">{q.sources.length ? `Sources: ${q.sources.join(", ")}` : "Source: the downside scenario in the acquisition model"}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+                <p className="mt-6 text-xs text-fg-muted">Generated from the demo&apos;s findings by the same code that produces a real export. Open the demo to read all {word(DEMO.questions)} and download the file.</p>
+              </figure>
             </div>
           </div>
         </section>

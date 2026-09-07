@@ -1,10 +1,10 @@
-/** Storyboard for the Evidence Core hero.
+/** Storyboard for the Evidence Sculpture hero.
  *
  *  Two clocks drive the scene. Scroll fraction `s ∈ [0,1]` is what the reader controls; storyboard progress `p ∈ [0,1]`
  *  is what every entity animates against. Ten fine-grained STAGES (each ~0.1 of `p`) own the ramps inside
- *  `evidence-core.tsx`; three CHAPTERS (one scroll each) are the readable story and own the HTML captions.
+ *  `evidence-sculpture.tsx`; three CHAPTERS (one scroll each) are the readable story and own the HTML captions.
  *  `storyProgress` maps `s` onto `p` piecewise-linearly so each chapter gets exactly one third of the scroll.
- *  See docs/design/3d-evidence-core.md. */
+ *  See docs/design/3d-evidence-sculpture.md. */
 
 export const STAGES = [
   { key: "enter", caption: "Deal documents enter the review", start: 0.0 },

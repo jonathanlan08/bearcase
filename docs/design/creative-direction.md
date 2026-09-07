@@ -54,7 +54,7 @@ Short declaratives. Present tense. Financial vocabulary used correctly. No excla
 ## 7. Decisions implementation must preserve
 
 1. Ink public site / Paper application split.
-2. The Evidence Core hero communicates the ten-step workflow; it is not a decorative object.
+2. The Evidence Sculpture hero communicates the ten-step workflow; it is not a decorative object.
 3. The citation hairline recurs in 3D, in landing sections, and in the app's claim–evidence split view.
 4. Status system: shape + label + color; four claim states, two covenant states.
 5. Tabular numerals with explicit units and periods everywhere.

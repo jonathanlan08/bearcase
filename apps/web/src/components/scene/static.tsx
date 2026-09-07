@@ -1,34 +1,63 @@
-/** Server-rendered static composition: the story's three states in one frame. The memo's growth claim is linked in red to the
- *  income statement that contradicts it; supported claims connect in blue; verified figures form a grid model with the covenant
- *  warning; the report assembles at the right. Used as the LCP element, the reduced-motion version, the WebGL fallback, and the
- *  paused view. `align="right"` shifts the composition right of centre for the side-by-side layout (copy on the left).
- *  The three HTML captions live in the hero, not here, so every path shows the same words. */
-export function EvidenceCoreStatic({ align = "center" }: { align?: "center" | "right" }) {
-  const nodes = [[540, 150, "s"], [600, 200, "s"], [520, 250, "c"], [640, 260, "c"], [560, 320, "c"], [610, 360, "c"], [480, 200, "s"], [500, 330, "s"], [660, 150, "u"], [470, 280, "r"]] as const;
-  const color = (k: string) => (k === "s" ? "#7FB2FF" : k === "c" ? "#EF7360" : k === "r" ? "#E7AA40" : "#8A94A0");
+/** Server-rendered static composition: the Evidence Sculpture in one frame, drawn in isometric SVG. The seller's memo sits
+ *  above a glass inspection plane and the income statement; one red line runs from the memo's 18% growth claim to the
+ *  statement cell that recomputes it as 11.6%; a small bear sits on the graphite base. Used as the LCP element, the
+ *  reduced-motion version, the WebGL fallback, and the paused view. `align="right"` shifts the composition right of centre
+ *  for the side-by-side layout (copy on the left). The three HTML captions live in the hero, not here, so every path
+ *  shows the same words. */
+export function EvidenceSculptureStatic({ align = "center" }: { align?: "center" | "right" }) {
   const mono = "ui-monospace, monospace";
+  // Isometric helpers: a flat rectangle w×d at height h becomes a parallelogram. Origin is the base's back corner.
+  const iso = (x: number, z: number, y: number): [number, number] => [600 + (x - z) * 0.866, 420 + (x + z) * 0.5 - y];
+  const slab = (x0: number, z0: number, w: number, d: number, y: number) => {
+    const a = iso(x0, z0, y), b = iso(x0 + w, z0, y), c = iso(x0 + w, z0 + d, y), e = iso(x0, z0 + d, y);
+    return `${a.join(",")} ${b.join(",")} ${c.join(",")} ${e.join(",")}`;
+  };
+  const grid = (x0: number, z0: number, w: number, d: number, y: number, rows: number, cols: number, stroke: string) => {
+    const lines: string[] = [];
+    for (let r = 1; r < rows; r++) { const z = z0 + (d * r) / rows; const a = iso(x0 + 14, z, y), b = iso(x0 + w - 14, z, y); lines.push(`M${a[0]},${a[1]} L${b[0]},${b[1]}`); }
+    for (let c = 1; c < cols; c++) { const x = x0 + (w * c) / cols; const a = iso(x, z0 + 30, y), b = iso(x, z0 + d - 14, y); lines.push(`M${a[0]},${a[1]} L${b[0]},${b[1]}`); }
+    return <path d={lines.join(" ")} stroke={stroke} strokeWidth="1" fill="none" opacity="0.7" />;
+  };
+  const cell = (x: number, z: number, w: number, d: number, y: number) => <polygon points={slab(x, z, w, d, y)} fill="#E4533C" fillOpacity="0.75" />;
+  const claim = iso(264, 146, 300), source = iso(308, 223, 54);
+  const bear = iso(392, 270, 0);
   return (
-    <svg viewBox={align === "right" ? "-200 0 1200 700" : "0 0 1200 700"} className="h-full w-full" preserveAspectRatio="xMidYMid slice" role="img" aria-labelledby="ec-title ec-desc">
-      <title id="ec-title">The Evidence Core</title>
-      <desc id="ec-desc">Six deal documents send claims into an analysis core. The memo&apos;s claim of 18% annual growth is linked in red to the income statement, which shows 11.6%. Supported claims connect in blue, an unsupported claim has lost its connection, and the verified figures form a grid model whose covenant row is marked in amber next to an assembled report.</desc>
-      <rect x="-400" width="2000" height="700" fill="#07080A" />
-      <g opacity="0.55">{Array.from({ length: 170 }).map((_, i) => { const x = ((i * 97) % 1500) - 300, y = (i * 61) % 700; return <circle key={i} cx={x} cy={y} r={i % 5 === 0 ? 1.6 : 1} fill="#F5F2EC" opacity={0.25 + (i % 4) * 0.12} />; })}</g>
-      {[[300, 120, 0], [330, 250, -4], [290, 390, 3], [340, 520, -2], [860, 130, 2], [900, 420, -3]].map(([x, y, r], i) => (
-        <g key={i} transform={`translate(${x} ${y}) rotate(${r})`}><rect width="120" height="150" fill="#F5F2EC" fillOpacity="0.92" stroke="#2C333C" /><g stroke="#2C333C" strokeWidth="2">{[24, 40, 56, 72, 88, 104].map((yy) => <line key={yy} x1="14" x2={yy % 32 === 8 ? 70 : 100} y1={yy} y2={yy} />)}</g></g>
-      ))}
-      {/* Story labels: the claim on the memo, the recomputed figure on the statements. */}
-      <text x="300" y="106" fill="#8A94A0" fontFamily={mono} fontSize="11">CIM: 18% growth claimed</text>
-      <text x="860" y="116" fill="#8A94A0" fontFamily={mono} fontSize="11">Statements: 11.6% a year</text>
-      <circle cx="580" cy="260" r="115" fill="#15181D" fillOpacity="0.35" stroke="#7FB2FF" strokeOpacity="0.55" strokeWidth="1.5" />
-      <circle cx="580" cy="260" r="115" fill="none" stroke="#7FB2FF" strokeOpacity="0.15" strokeWidth="24" />
-      <g stroke="#2C333C" fill="none"><polygon points="580,175 655,215 655,305 580,345 505,305 505,215" /><path d="M580,175 L580,345 M505,215 L655,305 M655,215 L505,305" /></g>
-      {nodes.map(([x, y, k], i) => { const dx = i % 2 ? 420 : 900, dy = 200 + (i * 53) % 300; return <g key={i}>{k !== "u" && <line x1={x} y1={y} x2={dx} y2={dy} stroke={color(k)} strokeOpacity="0.7" strokeWidth="1" strokeDasharray={k === "r" ? "4 3" : undefined} />}{k === "u" && <line x1={x} y1={y} x2={x + 20} y2={y + 30} stroke={color(k)} strokeOpacity="0.4" strokeWidth="1" strokeDasharray="2 4" />}{k === "c" ? <polygon points={`${x},${y - 7} ${x + 7},${y} ${x},${y + 7} ${x - 7},${y}`} fill={color(k)} /> : k === "r" ? <rect x={x - 5} y={y - 5} width="10" height="10" fill="none" stroke={color(k)} strokeWidth="1.5" /> : <circle cx={x} cy={y} r="5" fill={color(k)} />}</g>; })}
-      {/* The hero claim: a larger contradicted node whose evidence line runs from the memo to the statements. */}
-      <line x1="420" y1="195" x2="520" y2="250" stroke="#EF7360" strokeOpacity="0.9" strokeWidth="1.5" />
-      <line x1="520" y1="250" x2="900" y2="205" stroke="#EF7360" strokeOpacity="0.9" strokeWidth="1.5" />
-      <polygon points="520,240 530,250 520,260 510,250" fill="#EF7360" />
-      <g transform="translate(700 380)">{Array.from({ length: 36 }).map((_, i) => { const r = Math.floor(i / 6), c = i % 6; const warn = r === 4; return <rect key={i} x={c * 34} y={r * 26 + (warn ? 6 : 0)} width="28" height="20" fill={warn ? "#E7AA40" : "#F5F2EC"} fillOpacity={warn ? 0.75 : 0.85 - r * 0.06} stroke="#2C333C" />; })}<polygon points="-16,124 -6,106 4,124" fill="none" stroke="#EF7360" strokeWidth="1.5" /><text x="-30" y="150" fill="#8A94A0" fontFamily={mono} fontSize="11">DSCR 0.99x below 1.25x</text></g>
-      <g transform="translate(980 520)">{[0, 1, 2, 3].map((i) => <rect key={i} x={i * 4} y={-i * 6} width="110" height="70" fill="#F5F2EC" fillOpacity={0.9} stroke="#2C333C" />)}<text x="16" y="12" fill="#0D0F12" fontFamily={mono} fontSize="9">RED-TEAM REPORT</text></g>
+    <svg viewBox={align === "right" ? "-160 0 1200 760" : "0 0 1200 760"} className="h-full w-full" preserveAspectRatio="xMidYMid slice" role="img" aria-labelledby="es-title es-desc">
+      <title id="es-title">The Evidence Sculpture</title>
+      <desc id="es-desc">The seller&apos;s memo lies above a glass inspection plane and the income statement on a graphite base. One red line runs from the memo&apos;s claim of 18% growth to the statement cell that recomputes it as 11.6%. A small bear sits on the base.</desc>
+      <rect x="-400" width="2000" height="760" fill="#07080A" />
+      {/* base slab: top face and two visible sides */}
+      <polygon points={slab(0, 0, 440, 320, 0)} fill="#1C2026" />
+      <polygon points={`${iso(0, 320, 0).join(",")} ${iso(440, 320, 0).join(",")} ${iso(440, 320, -34).join(",")} ${iso(0, 320, -34).join(",")}`} fill="#14171C" />
+      <polygon points={`${iso(440, 0, 0).join(",")} ${iso(440, 320, 0).join(",")} ${iso(440, 320, -34).join(",")} ${iso(440, 0, -34).join(",")}`} fill="#0F1216" />
+      {/* income statement */}
+      <polygon points={slab(60, 40, 300, 220, 54)} fill="#F1EDE4" stroke="#B9B3A7" />
+      {grid(60, 40, 300, 220, 54, 8, 4, "#B9B3A7")}
+      <polygon points={slab(74, 52, 272, 22, 54)} fill="#2C333C" fillOpacity="0.1" />
+      {cell(276, 214, 64, 18, 54)}
+      {/* glass plane */}
+      <polygon points={slab(40, 24, 340, 252, 170)} fill="#8FB0C8" fillOpacity="0.28" stroke="#BFD6E6" strokeOpacity="0.6" />
+      <polygon points={`${iso(40, 276, 170).join(",")} ${iso(380, 276, 170).join(",")} ${iso(380, 276, 164).join(",")} ${iso(40, 276, 164).join(",")}`} fill="#BFD6E6" fillOpacity="0.35" />
+      {/* memo */}
+      <polygon points={slab(60, 40, 300, 220, 300)} fill="#F1EDE4" stroke="#B9B3A7" />
+      <polygon points={slab(74, 50, 150, 10, 300)} fill="#2C333C" fillOpacity="0.8" />
+      <polygon points={slab(74, 66, 240, 6, 300)} fill="#6F7780" fillOpacity="0.6" />
+      {grid(60, 100, 300, 160, 300, 6, 3, "#B9B3A7")}
+      {cell(232, 136, 64, 20, 300)}
+      {/* the one red line, memo claim to statement cell, through the glass */}
+      <line x1={claim[0]} y1={claim[1]} x2={source[0]} y2={source[1]} stroke="#E4533C" strokeWidth="2" />
+      <circle cx={claim[0]} cy={claim[1]} r="3.5" fill="#E4533C" />
+      <circle cx={source[0]} cy={source[1]} r="3.5" fill="#E4533C" />
+      <text x={claim[0] + 14} y={claim[1] - 8} fill="#8A94A0" fontFamily={mono} fontSize="12">memo: 18% growth</text>
+      <text x={source[0] + 14} y={source[1] + 16} fill="#8A94A0" fontFamily={mono} fontSize="12">statements: 11.6%</text>
+      {/* low-poly bear silhouette, front-right corner */}
+      <g transform={`translate(${bear[0]} ${bear[1]})`}>
+        <polygon points="-22,0 22,0 26,-30 18,-58 6,-66 -8,-66 -20,-56 -26,-30" fill="#262B32" />
+        <polygon points="-10,-60 12,-60 18,-78 10,-92 -8,-92 -16,-78" fill="#2E343C" />
+        <polygon points="-16,-88 -8,-100 -2,-90" fill="#262B32" />
+        <polygon points="4,-90 10,-100 18,-88" fill="#262B32" />
+        <polygon points="-2,-78 12,-76 8,-68 -2,-70" fill="#1B1F25" />
+      </g>
     </svg>
   );
 }

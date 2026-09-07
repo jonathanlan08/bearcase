@@ -1,0 +1,51 @@
+# The Evidence Sculpture — 3D hero specification
+
+Purpose: tell the product's story in three readable states — **the seller says 18% growth → the statements show 11.6% → open the evidence** — with an object that reads as a piece of evidence, not a toy. The scene is a sculpture on a graphite base: the seller's memo on top, a smoke-blue glass inspection plane, and the income statement underneath. One red line joins the memo's claim to the statement cell that contradicts it. A small low-poly bear sits on the base as the brand mark. The concept image that set the direction is `bearcase.ai astra rewrite/design-assets/evidence-sculpture-v1.png` (a static render; the site's version is real-time 3D).
+
+Implementation: `apps/web/src/components/landing/hero.tsx` (layout, captions, pause control, scroll store), `apps/web/src/components/scene/storyboard.ts` (chapters, scroll → progress mapping), `apps/web/src/components/scene/evidence-sculpture.tsx` (the react-three-fiber scene), `apps/web/src/components/scene/static.tsx` (the isometric SVG shown before WebGL is ready, under reduced motion, without WebGL, and when paused). No image or model assets: the sheets are canvas textures drawn from real Northstar figures, the bear is flat-shaded primitives. A Blender-modelled bear can replace the primitives later by loading a GLB in `Bear`; nothing else needs to change.
+
+## Story chapters
+
+Scroll fraction `s ∈ [0,1]` maps onto storyboard progress `p` (`storyProgress` in `storyboard.ts`); each chapter is one third of the scroll.
+
+| Chapter | `p` | Caption (HTML) | What the scene does |
+|---|---|---|---|
+| 1 Claim | 0–0.50 | **Seller says 18% growth** | The three layers rest closed on the base. The memo's "Annual revenue growth 18%" cell takes a red mark (p 0.10–0.30). |
+| 2 Evidence | 0.50–0.68 | **The statements show 11.6%** | The layers lift apart (0.50–0.64); the red line grows from the memo cell down through the glass to the statement's recomputed growth cell (0.54–0.66), which takes its own mark (0.60–0.70). |
+| 3 Open | 0.68–1.00 | **Open the evidence** | The glass slides aside and tilts, the memo lifts further, and the camera dollies down to the statement cell (0.70–0.96). A small label names the source beside it (0.84–0.95). The primary action, *Explore the demo*, is the "open". |
+
+Captions are an `<ol>` in the DOM, never inside the canvas; the active step carries `aria-current="step"`, a rule, and heavier type. The canvas carries a `role="img"` label describing the whole object. The source label inside the scene is `aria-hidden` because the caption list says the same thing.
+
+## Geometry (world units)
+
+- Base: rounded box 7.6 × 0.5 × 5.4, top at y = 0.25, graphite (`#1A1E24`, roughness 0.88).
+- Sheets: 3.6 × 0.022 × 2.6 boxes; the top face carries the texture. Statement at y = 0.33; memo at y = 0.97, rising to 2.52 exploded and 3.02 open.
+- Glass: 4.1 × 0.06 × 3.0 box with `MeshTransmissionMaterial` (tiers 2–3) or a transparent physical material (tier 1); y = 0.67, rising to 1.52; slides 2.9 in x in chapter 3.
+- Cells: texture fractions (`CLAIM_CELL`, `SOURCE_CELL`) converted to world offsets by `cellWorld`; marks are translucent red planes 0.016 above the sheet; the link is a 0.012-radius cylinder rescaled each frame.
+- Bear: nine flat-shaded primitives at scale 0.5 on the base's front-right corner.
+
+## Textures
+
+Two 1024 × 740 canvases. The memo: "Northstar HVAC Services · Confidential Information Memorandum · Financial highlights", three lines of memo prose, and a five-row highlights table (FY2024 revenue $12.95M, annual revenue growth 18%, adjusted EBITDA $2.10M, recurring revenue 85%, largest customer < 10%). The statement: "Income statement (USD)" with FY2022–FY2024 revenue, COGS, gross profit, operating expenses, EBITDA, and net income from `fixtures/northstar-hvac/northstar-ground-truth.json`, plus the recomputed growth row (11.5%, 11.6%) marked as BearCase's, not the seller's. Change a figure in the fixtures and change it here too; the numbers are literals.
+
+## Camera and framing
+
+A studio orbit (fov 30). The hero measures the free region of the viewport (right of the copy at `lg`+, the band between captions and copy when stacked) and the camera distance is chosen so the 8.4-unit sculpture fits that region's width, clamped to 8.5–16, plus a portrait allowance. The orbit target is the sculpture's centre placed at the region's centre; in chapter 3 it moves to the source cell while the distance shortens by 4.2. Pointer position nudges azimuth and elevation; drag adds to them and decays; an idle drift of ±0.04 rad keeps the object alive. Everything is damped, so scrolling back plays the story in reverse smoothly.
+
+## Lighting and post
+
+Key directional light 2.2 at (5, 9, 4) with a 2048 shadow map at tier 3; a cool point light from the left, a warm fill from the front; an `Environment` of three lightformers at tiers 2–3; `ContactShadows` under the base. Bloom (0.25, threshold 0.8) and a vignette switch on after the eighth frame.
+
+## Performance tiers
+
+| Tier | When | dpr | AA | Glass | Shadows |
+|---|---|---|---|---|---|
+| 3 | ≥ 8 cores, not mobile | 1.75 | yes | transmission, 8 samples, 512 buffer | yes |
+| 2 | default | 1.5 | yes | transmission, 4 samples, 256 buffer | no |
+| 1 | mobile or ≤ 4 GB | 1.25 | no | transparent material | no |
+
+A watchdog averages frame time over ~90 frames and drops one tier when it exceeds 22 ms. The canvas renders on demand when off screen, unmounts on *Pause 3D*, and treats a lost context on a live canvas as failure (static fallback). Reduced motion never mounts the canvas.
+
+## Checks
+
+`make e2e` covers the landing page; `apps/web/scripts/scene-check.mjs` screenshots the three chapters against a running dev server. Chapter screenshots to confirm by eye: the memo's claim cell is marked in chapter 1; the red line reaches the statement cell in chapter 2; the source label reads beside the cell in chapter 3 and nothing sits under the headline.

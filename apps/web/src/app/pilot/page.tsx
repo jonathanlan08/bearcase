@@ -33,7 +33,7 @@ function StartPilot({ status, signedIn }: { status: BillingOffer; signedIn: bool
   const checkout = useMutation({
     mutationFn: () => billing.checkout(),
     onSuccess: ({ url }) => { window.location.assign(url); },
-    onError: (e) => setError(e instanceof ApiError && e.status === 401 ? "Sign in first, then come back to start the pilot." : errorDetail(e, "Checkout could not be started.")),
+    onError: (e) => setError(e instanceof ApiError && e.status === 401 ? "Sign in first, then come back to start the pilot." : e instanceof ApiError && e.status === 403 ? "A demo session cannot buy a pilot. Create an account with the button in the workspace header, then come back here." : errorDetail(e, "Checkout could not be started.")),
   });
   const price = fmtPrice(status.pilot.amount_cents, status.pilot.currency);
   if (!signedIn) {
