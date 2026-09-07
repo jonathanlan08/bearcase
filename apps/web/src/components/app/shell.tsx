@@ -6,11 +6,11 @@ import { useLocalFlag } from "@/lib/hooks";
 import { FolderOpen, ListChecks, Calculator, FlaskConical, FileText, LayoutDashboard, History, PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, MoreHorizontal } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { useDeal, useDeals, useSummary, qk } from "@/components/app/hooks";
+import { useDeal, useDeals, qk } from "@/components/app/hooks";
 import { useMe } from "@/components/app/gate";
 import { Wordmark } from "@/components/ui/primitives";
 import { DropdownMenu } from "radix-ui";
-import { DealChat } from "@/components/domain/deal-chat";
+import { DealChat, useChatConfig } from "@/components/domain/deal-chat";
 
 /** `short` is the mobile bottom-nav label: a whole word that still says what the screen is. */
 const PRIMARY = [
@@ -44,13 +44,13 @@ export function DealShell({ children }: { children: React.ReactNode }) {
   const qc = useQueryClient();
   const deal = useDeal(dealId);
   const deals = useDeals();
-  const summary = useSummary(dealId);
+  // Fetched once per deal here; the chat panel reads the same row when it opens.
+  const chatConfig = useChatConfig(dealId);
   const me = useMe();
   const [collapsed, setCollapsed] = useLocalFlag("bc.rail");
   const toggle = () => setCollapsed(!collapsed);
   const base = `/app/deals/${dealId}`;
   const isActive = (key: string) => (key ? pathname.startsWith(`${base}/${key}`) : pathname === base);
-  const mode = summary.data?.mode;
   const logout = async () => { await api.post("/api/auth/logout"); qc.clear(); router.push("/app"); };
 
   const NavLink = ({ href, label, Icon, active }: { href: string; label: string; Icon: React.ComponentType<{ size?: number }>; active: boolean }) => (
@@ -93,10 +93,10 @@ export function DealShell({ children }: { children: React.ReactNode }) {
           {SECONDARY.map((n) => <NavLink key={n.key} href={n.key ? `${base}/${n.key}` : base} label={n.label} Icon={n.Icon} active={isActive(n.key)} />)}
         </nav>
         <div className="mt-auto flex flex-col gap-2 p-3">
-          {!collapsed && mode && (
+          {!collapsed && chatConfig.data && (
             <div className="rounded-[var(--radius-2)] border border-hairline p-2">
-              <p className="text-xs font-medium">{mode.provider === "mock" ? "Rule-based mock" : "Live model"}</p>
-              <p className="mt-0.5 truncate font-mono text-[11px] text-fg-muted">{mode.model}</p>
+              <p className="text-xs font-medium">Assistant</p>
+              <p className="mt-0.5 truncate text-[11px] text-fg-muted">{chatConfig.data.live ? chatConfig.data.label : "Offline, rule-based"}</p>
             </div>
           )}
           {!collapsed && deal.data?.is_demo && <p className="text-[11px] leading-snug text-fg-muted">Northstar HVAC is fictional. Not financial, legal, tax, or investment advice.</p>}

@@ -40,6 +40,9 @@ class ProviderSpec:
     models: tuple[str, ...]
     """Ids a user can pick in the chat panel, default first. A request may only name one of these (or
     BEARCASE_CHAT_MODEL) for a live provider; see models_for and the chat route."""
+    fallback: tuple[str, ...] = ()
+    """Ids tried in order when the model that should answer is busy (5xx or an overloaded message on the
+    first request of a reply). The chain starts with the backend's own model; see fallback_chain."""
 
 
 REGISTRY: dict[str, ProviderSpec] = {
@@ -54,6 +57,7 @@ REGISTRY: dict[str, ProviderSpec] = {
         free_tier_note="No ongoing free tier: a small one-time trial credit, then prepaid credits (claude-haiku-4-5 is $1 per million input tokens).",
         key_url="https://platform.claude.com/settings/keys",
         models=("claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5"),
+        fallback=("claude-haiku-4-5", "claude-sonnet-5"),
     ),
     "openai": ProviderSpec(
         name="openai",
@@ -66,6 +70,7 @@ REGISTRY: dict[str, ProviderSpec] = {
         free_tier_note="No free tier: prepaid credits from $5 (gpt-5.6-luna is $0.20 per million input tokens).",
         key_url="https://platform.openai.com/api-keys",
         models=("gpt-5.6-luna", "gpt-5.6-terra", "gpt-4.1-mini", "gpt-4o-mini"),
+        fallback=("gpt-5.6-luna", "gpt-4.1-mini"),
     ),
     "gemini": ProviderSpec(
         name="gemini",
@@ -78,6 +83,7 @@ REGISTRY: dict[str, ProviderSpec] = {
         free_tier_note="Free tier in Google AI Studio with no card; rate limits are per project and shown in AI Studio.",
         key_url="https://aistudio.google.com/apikey",
         models=("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-flash-lite"),
+        fallback=("gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"),
     ),
     "groq": ProviderSpec(
         name="groq",
@@ -90,6 +96,7 @@ REGISTRY: dict[str, ProviderSpec] = {
         free_tier_note="Free plan with no card: 30 requests/min, 1,000 requests/day, 8K tokens/min for gpt-oss-120b.",
         key_url="https://console.groq.com/keys",
         models=("openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b", "qwen/qwen3.8-27b"),
+        fallback=("openai/gpt-oss-120b", "openai/gpt-oss-20b"),
     ),
     "openrouter": ProviderSpec(
         name="openrouter",
@@ -102,6 +109,12 @@ REGISTRY: dict[str, ProviderSpec] = {
         free_tier_note="':free' models cost $0: 20 requests/min and 50/day (1,000/day after a one-time $10 credit purchase).",
         key_url="https://openrouter.ai/keys",
         models=(
+            "z-ai/glm-5.2:free",
+            "nvidia/nemotron-3-super-120b-a12b:free",
+            "minimax/minimax-m3:free",
+            "google/gemma-4-31b-it:free",
+        ),
+        fallback=(
             "z-ai/glm-5.2:free",
             "nvidia/nemotron-3-super-120b-a12b:free",
             "minimax/minimax-m3:free",
@@ -212,6 +225,14 @@ def models_for(backend: ChatBackend, settings: Settings | None = None) -> list[s
     s = settings or get_settings()
     spec = REGISTRY.get(backend.name)
     candidates = [s.chat_model or "", backend.model, *(spec.models if spec else ())]
+    return [m for m in dict.fromkeys(candidates) if m]
+
+
+def fallback_chain(backend: ChatBackend) -> list[str]:
+    """Models tried for one reply, in order: the backend's own model first, then the provider's fallback ids.
+    Ollama, custom servers, and the rule-based composer have no fallback, so the chain is just their model."""
+    spec = REGISTRY.get(backend.name)
+    candidates = [backend.model, *(spec.fallback if spec else ())]
     return [m for m in dict.fromkeys(candidates) if m]
 
 

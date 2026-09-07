@@ -6,7 +6,7 @@ BearCase AI is an open-source prototype for reviewing a small-business acquisiti
 
 It is built for people buying one business at a time: acquisition entrepreneurs, search-fund buyers, small deal teams, and the analysts who help them.
 
-[Demo](#quick-start) · [First session](#what-you-can-answer-in-a-first-session) · [Methodology](docs/formulas/README.md) · [Architecture](docs/architecture.md) · [Design](docs/design/README.md) · [Security](SECURITY.md) · [Review response](docs/astra-review-response.md)
+[Demo](#quick-start) · [First session](#what-you-can-answer-in-a-first-session) · [Deploy](#deploy) · [Methodology](docs/formulas/README.md) · [Architecture](docs/architecture.md) · [Design](docs/design/README.md) · [Security](SECURITY.md) · [Review response](docs/astra-review-response.md)
 
 > The included Northstar HVAC deal is entirely fictional. BearCase is an educational prototype and does not provide financial, legal, tax, or investment advice. Do not upload confidential documents to a public deployment yet; see [Limits](#limits).
 
@@ -97,7 +97,7 @@ To put a live model behind the chat ("Ask the deal", ⌘/ inside a deal), add on
 | OpenAI | `OPENAI_API_KEY` | No, prepaid credits | `gpt-5.6-luna` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
 | Anthropic | `ANTHROPIC_API_KEY` | No, prepaid credits; new Console accounts get a small one-time test credit, and a claude.ai subscription does not include API access | `claude-haiku-4-5` | [platform.claude.com/settings/keys](https://platform.claude.com/settings/keys) |
 
-Prices and rate limits change; check the provider's pricing page before relying on a free tier. Free tiers may log or train on what you send (Gemini's free tier and OpenRouter's free endpoints say so), and the chat sends claim text and evidence snippets from the deal to the provider, so keep real deal documents off them.
+Prices and rate limits change; check the provider's pricing page before relying on a free tier. Free tiers may log or train on what you send (Gemini's free tier and OpenRouter's free endpoints say so), and the chat sends claim text and evidence snippets from the deal to the provider, so keep real deal documents off them. On a deployment every visitor's chat runs on the operator's one key: on the Gemini free tier that means all users share one project's rate limit and its training terms, and on a paid plan one bill; `BEARCASE_CHAT_PROVIDER=mock` runs a deployment with no model bill at all.
 
 Three steps:
 
@@ -144,6 +144,15 @@ make docker-up
 ```
 
 `infra/docker-compose.yml` runs the production shape: PostgreSQL, MinIO for S3-compatible storage, the API with `BEARCASE_JOB_RUNNER=poll`, a separate worker, and the web app. It is a development example with development credentials and published ports, not a hardened configuration, and it has not been run on the development machine (no Docker there).
+
+## Deploy
+
+The recommended public setup is Render for the API and PostgreSQL and Vercel for the web app: `infra/render.yaml` is a Render Blueprint (database, Docker API service, generated secret, the Gemini key entered in the dashboard), and the web app needs only `BEARCASE_API_URL` set to the Render URL because Next.js proxies `/api` to it.
+Before the first start run `bearcase migrate`, then `bearcase doctor`: it prints a readiness table (database reachable and migrated, storage writable, secret set, which model answers by label, limits and quotas) and exits 1 on a failure; the Blueprint runs both before every start.
+With `BEARCASE_ENV=production` the API refuses the development secret and logs a warning for localhost CORS origins, SQLite, local storage, `auto` chat with no key, or a disabled limiter.
+One API instance is assumed: the rate limiter lives in process memory.
+On the Gemini free tier all visitors share one project's rate limit and inputs may be used for training, so a deployment for confidential deals needs a paid plan or `BEARCASE_CHAT_PROVIDER=mock`. Measured on 2026-09-06: the free tier allowed 20 requests per day per model for gemini-3.8-flash (quota id GenerateRequestsPerDayPerProjectPerModel-FreeTier), which a few hours of testing used up. The cached deal brief keeps most answers to one request, and a model that is busy or has hit its per-model cap hands over to the next Gemini model, each with its own daily allowance, so a demo stretches further; a product with real users needs the paid tier.
+Step by step, the Docker Compose path, the environment variable table, and what a paid product would still need are in [docs/deployment.md](docs/deployment.md).
 
 ## Testing and evaluation
 

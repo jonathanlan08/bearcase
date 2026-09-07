@@ -26,6 +26,7 @@ from bearcase.api.routes import (
     reports,
     scenarios,
 )
+from bearcase.chat.providers import effective_backend
 from bearcase.config import get_settings
 
 log = logging.getLogger("bearcase")
@@ -46,11 +47,18 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     settings = get_settings()
     if settings.env != "production":
         run_migrations()
+    chat_backend = effective_backend(settings)  # label and model id only; never a key
     log.info(
-        "BearCase API %s starting (provider=%s, db=%s)",
+        "BearCase API %s starting (env=%s, db=%s, storage=%s, jobs=%s, extraction=%s, chat=%s/%s, rate_limit=%s)",
         __version__,
-        settings.ai_provider,
+        settings.env,
         "sqlite" if settings.is_sqlite else "postgresql",
+        settings.storage_backend,
+        settings.job_runner,
+        settings.ai_provider,
+        chat_backend.label,
+        chat_backend.model,
+        f"{settings.rate_limit_per_minute}/min" if settings.rate_limit_enabled else "off",
     )
     yield
 

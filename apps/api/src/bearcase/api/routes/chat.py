@@ -93,6 +93,8 @@ def config(deal: DealDep) -> dict:
             f"Live model: answers are drafted by {backend.label} ({backend.model}) from tool results over persisted rows, "
             "and every citation is validated in code."
         )
+    # With the picker off (the default) the panel gets one model and no choice: the configured default answers
+    # everyone. models_for still validates an explicit override on POST, so a script can name an offered id.
     return {
         "provider": backend.name,
         "label": backend.label,
@@ -100,7 +102,8 @@ def config(deal: DealDep) -> dict:
         "live": backend.kind != "mock",
         "note": note,
         "suggested": SUGGESTED,
-        "models": models_for(backend, s),
+        "models": models_for(backend, s) if s.chat_model_picker else [backend.model],
+        "picker": s.chat_model_picker,
         "options": public_options(),
     }
 
@@ -139,7 +142,7 @@ def delete_thread(deal: DealDep, thread_id: uuid.UUID, db: DbDep, user: UserDep)
 
 @router.post("/deals/{deal_id}/chat")
 def chat(deal: DealDep, body: ChatRequest, db: DbDep, user: UserDep) -> StreamingResponse:
-    """Server-Sent Events: meta, tool, text, citations, done, error."""
+    """Server-Sent Events: meta, tool, text, switch, citations, done, error (see chat/service.py)."""
     if body.model is not None:
         if not validate_model_id(body.model):
             raise HTTPException(400, "Unknown model id.")

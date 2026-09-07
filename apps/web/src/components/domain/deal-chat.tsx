@@ -17,11 +17,13 @@ import { fmtDate, fmtInt } from "@/lib/format";
 /** "deal" when the reply used deal tools, resolved a citation, or stated an uncited figure; "general" only for a grounded general-assistant answer. */
 export type AnswerScope = "deal" | "general";
 export interface Citations extends CitationSources { unresolved?: number; material_sentences?: number; cited_sentences?: number; scope?: AnswerScope }
-export interface Msg { id: string; role: "user" | "assistant"; content: string; citations: Citations; tool_calls: Array<{ name: string; label?: string }>; grounded: boolean; scope?: AnswerScope; provider: string; model: string; label?: string; error: string | null; created_at: string; streaming?: boolean; tools?: string[] }
+/** `notice` is the server-worded line from a `switch` event (the default model was busy and a fallback answered); only a streamed draft carries it. */
+export interface Msg { id: string; role: "user" | "assistant"; content: string; citations: Citations; tool_calls: Array<{ name: string; label?: string }>; grounded: boolean; scope?: AnswerScope; provider: string; model: string; label?: string; error: string | null; created_at: string; streaming?: boolean; tools?: string[]; notice?: string }
 interface Thread { id: string; title: string; created_at: string; updated_at: string; message_count: number }
 interface ThreadDetail extends Thread { messages: Msg[] }
 export interface ChatOption { provider: string; label: string; env: string; free_tier: boolean; free_tier_note: string; default_model: string; key_url: string; models?: string[] }
-interface ChatConfig { provider: string; label: string; model: string; models?: string[]; live: boolean; note: string; suggested: string[]; options: ChatOption[] }
+/** `picker` is the server's opt-in for a model choice; without it the panel never names or offers a model. */
+export interface ChatConfig { provider: string; label: string; model: string; models?: string[]; picker?: boolean; live: boolean; note: string; suggested: string[]; options: ChatOption[] }
 
 /**
  * Companion prompts shown under the input whenever the assistant is not busy. The first two need the user's context
@@ -35,7 +37,18 @@ export const QUICK_PROMPTS: ReadonlyArray<{ label: string; text: string; send: b
   { label: "What changed after this scenario?", text: "What changed after this scenario?", send: true },
 ];
 
+/** Which backend answers chat. One row per deal, shared by the shell card and the panel, so opening the panel does not fetch it again. */
+export function useChatConfig(dealId: string) {
+  return useQuery({ queryKey: ["chat-config", dealId], queryFn: () => api.get<ChatConfig>(`/api/deals/${dealId}/chat/config`), enabled: !!dealId, staleTime: Infinity });
+}
+
+/** Provider throttling reads as "wait", not "broken": the review glyph instead of the error tone. */
+export function isRateLimit(message: string): boolean {
+  return /rate limit|too many requests/i.test(message);
+}
+
 const ACTION = "text-[11px] text-fg-muted underline-offset-2 hover:text-fg hover:underline";
+const CURSOR = <span className="ml-0.5 inline-block h-[1em] w-[2px] animate-pulse bg-fg align-text-bottom" aria-hidden />;
 const CHIP = "rounded-[var(--radius-1)] border border-hairline px-2 py-1 text-left text-[11px] text-fg-muted transition-colors duration-[120ms] hover:bg-bg-muted hover:text-fg";
 
 /** The most recent thread per deal for this browser session, so reopening the panel resumes the conversation. */
@@ -97,7 +110,7 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const config = useQuery({ queryKey: ["chat-config", dealId], queryFn: () => api.get<ChatConfig>(`/api/deals/${dealId}/chat/config`) });
+  const config = useChatConfig(dealId);
   const threads = useQuery({ queryKey: ["chat-threads", dealId], queryFn: () => api.get<Thread[]>(`/api/deals/${dealId}/chat/threads`) });
   const [storedModel, setStoredModel] = useLocalString(`bearcase.chat.model.${dealId}`);
 
@@ -110,8 +123,8 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
   const live = config.data?.live === true;
   const defaultModel = config.data?.model ?? "";
   const models = config.data?.models ?? [];
-  const model = storedModel && models.includes(storedModel) ? storedModel : defaultModel;
-  const pickModel = live && models.length > 1;
+  const pickModel = live && config.data?.picker === true && models.length > 1;
+  const model = pickModel && storedModel && models.includes(storedModel) ? storedModel : defaultModel;
 
   const loadThread = useCallback(async (id: string) => {
     abortRef.current?.abort();
@@ -175,8 +188,9 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
           else if (ev === "tool" && data.status === "start") update((d) => ({ ...d, tools: [...(d.tools ?? []), data.label ?? data.name] }));
           else if (ev === "text") update((d) => ({ ...d, content: d.content + data.delta }));
           else if (ev === "citations") update((d) => ({ ...d, citations: { evidence: [], metrics: [], ...data }, scope: data.scope ?? d.scope }));
+          else if (ev === "switch") update((d) => ({ ...d, notice: data.message }));
           else if (ev === "error") update((d) => ({ ...d, error: data.message }));
-          else if (ev === "done") update((d) => ({ ...d, id: data.message_id, content: data.content, grounded: data.grounded, scope: data.scope ?? d.scope, streaming: false }));
+          else if (ev === "done") update((d) => ({ ...d, id: data.message_id, content: data.content, grounded: data.grounded, scope: data.scope ?? d.scope, model: data.model ?? d.model, streaming: false }));
         }
       }
     } catch (e) {
@@ -214,7 +228,7 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
         <div className="min-w-0 flex-1">
           <Dialog.Title className="text-sm font-semibold">Ask the deal</Dialog.Title>
           <Dialog.Description id="chat-desc" className="truncate text-[11px] text-fg-muted">
-            {config.data ? (live ? (pickModel ? `Live: ${config.data.label}` : `Live: ${config.data.label} · ${config.data.model}`) : "Demo mode · rule-based answers") : "Loading"}
+            {config.data ? (live ? "Answers drawn from the deal room, with citations" : "Offline mode: rule-based answers") : "Loading"}
           </Dialog.Description>
         </div>
         {pickModel && (
@@ -246,7 +260,7 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
               <div className="flex min-h-full flex-col justify-end gap-4">
                 <div className="text-sm text-fg-muted">
                   <p className="text-base font-semibold text-fg">Ask anything.</p>
-                  <p className="mt-2 max-w-[46ch]">{config.data?.note ?? ""}</p>
+                  {config.data && !live && <p className="mt-2 max-w-[46ch]">{config.data.note}</p>}
                   <p className="mt-2 max-w-[46ch]">Deal facts come from the claim ledger, verified metrics, add-back decisions, scenario runs, and the documents, each with a citation you can open. A citation shows where a figure came from, not that the whole answer is right, so open the sources before you rely on it. Everything else is answered as a general assistant.</p>
                 </div>
                 {config.data && !live && <ConnectModel options={config.data.options} />}
@@ -295,7 +309,6 @@ export function ConnectModel({ options }: { options: ChatOption[] }) {
             <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
               <a href={o.key_url} target="_blank" rel="noreferrer" className="font-medium text-accent underline-offset-2 hover:underline">{o.label}</a>
               <code className="font-mono text-[11px] text-fg">{o.env}</code>
-              <span className="break-all text-fg-muted">{o.default_model}</span>
               {o.free_tier && <span className="text-fg-muted">free tier</span>}
             </div>
             {o.free_tier_note && <p className="mt-0.5 max-w-[60ch] leading-snug text-[11px] text-fg-muted">{o.free_tier_note}</p>}
@@ -357,18 +370,22 @@ export function MessageView({ m, onOpen, onRegenerate }: { m: Msg; onOpen: (t: V
   };
   return (
     <li className="max-w-full">
-      {tools.length > 0 && <p className="mb-1.5 text-[11px] text-fg-muted">{Array.from(new Set(tools)).join(", ")}{m.streaming && !m.content ? "…" : ""}</p>}
+      {tools.length > 0 && <p className="mb-1.5 text-[11px] text-fg-muted">{Array.from(new Set(tools)).join(", ")}</p>}
+      {m.notice && <p className="mb-1.5 text-[11px] text-fg-muted">{m.notice}</p>}
       <div className="text-[15px] leading-relaxed">
-        {finished && !m.content && !m.error
-          ? <p className="text-xs text-fg-muted">No reply was recorded.</p>
-          : <RichText text={m.content} citations={m.citations} onOpen={onOpen} />}
-        {m.streaming && <span className="ml-0.5 inline-block h-[1em] w-[2px] animate-pulse bg-fg align-text-bottom" aria-hidden />}
+        {m.streaming && !m.content
+          ? <p role="status" className="text-xs text-fg-muted">{tools.length > 0 ? "Reading the deal room…" : "Thinking…"}{CURSOR}</p>
+          : finished && !m.content && !m.error
+            ? <p className="text-xs text-fg-muted">No reply was recorded.</p>
+            : <RichText text={m.content} citations={m.citations} onOpen={onOpen} />}
+        {m.streaming && m.content && CURSOR}
       </div>
-      {m.error && <p className="mt-2 text-xs text-red">{m.error}</p>}
+      {m.error && (isRateLimit(m.error)
+        ? <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-fg-muted"><StatusGlyph status="review_required" size={11} />{m.error}</p>
+        : <p className="mt-2 text-xs text-red">{m.error}</p>)}
       {finished && (
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-fg-muted">
           {verdict && <span className="inline-flex items-center gap-1" title={verdict.detail}><StatusGlyph status={verdict.status} size={11} />{verdict.text}</span>}
-          {m.provider && <span>{m.label ? `${m.label} · ${m.model}` : `${m.provider}/${m.model}`}</span>}
           <span>{fmtDate(m.created_at)}</span>
           {m.content && <button type="button" onClick={copy} aria-live="polite" className={ACTION}>{copied ? "Copied" : "Copy"}</button>}
           {onRegenerate && <button type="button" onClick={onRegenerate} className={ACTION}>Regenerate</button>}

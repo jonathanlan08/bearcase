@@ -26,6 +26,20 @@ BearCase is a portfolio prototype. These notes describe what it does today, not 
 | Provider keys | Read from the environment or `.env` only; each key is sent only to its own provider's endpoint or to a gateway named in `BEARCASE_CHAT_BASE_URL` (https except loopback and private networks); no endpoint returns a key; keys are redacted from provider error text before it is streamed, stored, or logged |
 | Immutability | Original extraction is never overwritten; reviewer decisions are additive rows; scenario results store input snapshots and hashes; audit events for every state change |
 | Secrets | No secrets in the repository; `.env.example` documents configuration |
+| Production mode | `BEARCASE_ENV=production` refuses to start with the development `BEARCASE_SECRET_KEY`, does not migrate on start, marks the session cookie Secure, and logs a warning for a localhost CORS origin, SQLite, local storage, `auto` chat with no key, and a disabled limiter (`config.py`); `bearcase doctor` prints the readiness table (database reachable and migrated, storage writable, secret set, chat and extraction providers by label, limits, quotas, CORS, job runner) and exits 1 on a failure, never printing a key |
+
+## Production checklist
+
+Before a URL is shared with anyone, in this order; `docs/deployment.md` has the walk-through.
+
+1. `BEARCASE_ENV=production` with a `BEARCASE_SECRET_KEY` of 32 or more random characters (`python -c 'import secrets; print(secrets.token_urlsafe(48))'`, or Render's `generateValue`). The API refuses the checked-in default.
+2. PostgreSQL in `BEARCASE_DATABASE_URL`; `bearcase migrate` before the first start (production does not migrate on start), then `bearcase doctor` with exit code 0.
+3. Object storage (`BEARCASE_STORAGE_BACKEND=s3`) or a persistent disk for any deployment that accepts real uploads; the demo works on an ephemeral disk, real documents do not survive a deploy on one.
+4. Provider keys only as platform secrets (Render `sync: false`, Vercel environment variables), never in an image or the repository; one key serves every visitor, so decide who pays and whether a free tier's training terms are acceptable. `BEARCASE_CHAT_PROVIDER=mock` for a deployment with no model calls.
+5. `BEARCASE_CORS_ORIGINS` set to the web app's origin as a JSON list without a trailing slash; TLS everywhere; `BEARCASE_TRUST_PROXY_HEADERS=true` only behind a proxy that appends to `X-Forwarded-For` (Render does).
+6. Rate limits on (`BEARCASE_RATE_LIMIT_ENABLED=true`, the default) and one API instance, because the limiter is in process memory; a body-size limit and a connection limit at the ingress, since the application checks the upload cap only after receiving the file.
+7. Read the startup log line once: it names the environment, database, storage, job runner, extraction provider, chat backend, and limiter, and lists the production warnings.
+8. Decide backups, retention, and monitoring before storing anything that matters; none of the three exists in the application (see the gaps below).
 
 ## Known gaps (not implemented)
 
@@ -47,7 +61,6 @@ Data handling
 Accounts and sessions
 
 - No CSRF token (SameSite cookie only), no account lockout, no email verification, no account recovery, no roles.
-- The API does not refuse to start in production mode with the default `BEARCASE_SECRET_KEY`.
 
 Operations
 

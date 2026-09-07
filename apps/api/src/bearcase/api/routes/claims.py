@@ -10,6 +10,7 @@ from bearcase.api.deps import DbDep, DealDep, UserDep
 from bearcase.api.routes.deals import effective_status
 from bearcase.api.schemas import ClaimDetailOut, ClaimOut, DecisionOut, EvidenceOut, LinkOut, MetricOut, ReviewRequest
 from bearcase.audit import record
+from bearcase.chat.brief import invalidate_brief
 from bearcase.models import Claim, ExtractionRun, FinancialMetric, ReviewDecision
 from bearcase.models.enums import ClaimUnit, LinkRole, ReviewAction
 
@@ -155,6 +156,7 @@ def review_claim(deal: DealDep, claim_id: uuid.UUID, body: ReviewRequest, db: Db
         },
     )
     db.commit()
+    invalidate_brief(deal.id)
     db.refresh(c)
     return get_claim(deal, claim_id, db)
 

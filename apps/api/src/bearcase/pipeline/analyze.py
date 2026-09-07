@@ -16,6 +16,7 @@ from bearcase.ai.guardrails import apply_guardrails
 from bearcase.ai.provider import AIProvider, ChunkRef, ClaimContext, DocumentContext, get_provider
 from bearcase.ai.retrieval import LexicalRetriever
 from bearcase.audit import record
+from bearcase.chat.brief import invalidate_brief
 from bearcase.engine import formulas as f
 from bearcase.engine.metrics import LABOR_LINE_KEYS, LINE_KEYS, format_multiple, format_plain, format_value, period_metrics
 from bearcase.engine.money import Calc, D
@@ -1714,6 +1715,7 @@ def analyze_deal(db: Session, job: ProcessingJob, jl: JobLog, provider: AIProvid
         payload={"documents": len(docs), "scenario_error": scenario_error, "job_id": str(job.id)},
     )
     db.commit()
+    invalidate_brief(deal.id)
 
 
 def generate_report(

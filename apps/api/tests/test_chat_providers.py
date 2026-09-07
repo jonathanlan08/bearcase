@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import types
 import uuid
+from itertools import pairwise
 from typing import Any
 
 import httpx
@@ -343,13 +344,19 @@ def test_openai_compat_end_to_end(client, demo, db, monkeypatch: pytest.MonkeyPa
     assert citations["metrics"][0]["key"] == "ebitda_adjusted_verified" and citations["scope"] == "deal"
     done = events[-1][1]
     assert done["grounded"] is True and done["error"] is None and "$1,810,000" in done["content"]
-    assert done["scope"] == "deal" and set(done) == {"message_id", "grounded", "scope", "content", "error"}
-    # requests: system prompt first, no temperature, usage requested, tools on the tool round, echoed tool call
+    assert done["scope"] == "deal" and set(done) == {"message_id", "grounded", "scope", "content", "error", "model"}
+    assert done["model"] == "gemini-3.8-flash"
+    # requests: system prompt first, no temperature, usage requested, tools on the tool round, echoed tool call,
+    # the output cap and low reasoning effort from settings (Gemini takes max_tokens, not max_completion_tokens)
     calls = fake.chat.completions.calls
     assert len(calls) == 2 and all("temperature" not in c and c.get("stream_options") == {"include_usage": True} for c in calls)
+    assert all(c["max_tokens"] == 2048 and c["reasoning_effort"] == "low" and "max_completion_tokens" not in c for c in calls)
     assert calls[0]["stream"] is True and calls[0]["tools"] == openai_tools() and calls[0]["model"] == "gemini-3.8-flash"
     msgs = calls[1]["messages"]
     assert msgs[0]["role"] == "system" and "Northstar" in msgs[0]["content"]
+    # the deal brief rides in the system prompt with the id the reply cited
+    assert "## Deal brief" in msgs[0]["content"] and "<deal_brief>" in msgs[0]["content"]
+    assert "$1,810,000" in msgs[0]["content"] and f"[M:{seen['metric_id'][:8]}" in msgs[0]["content"]
     assistant_turn = next(m for m in msgs if m["role"] == "assistant" and m.get("tool_calls"))
     assert assistant_turn["tool_calls"] == [
         {"id": "call_1", "type": "function", "function": {"name": "get_adjustments", "arguments": "{}"}}
@@ -362,14 +369,15 @@ def test_openai_compat_end_to_end(client, demo, db, monkeypatch: pytest.MonkeyPa
     assert persisted["tool_calls"][0]["name"] == "get_adjustments" and persisted["tool_calls"][0]["result_chars"] > 100
     assert persisted["citations"]["scope"] == "deal"
     row = db.get(ChatMessage, uuid.UUID(meta["message_id"]))
-    assert row is not None and row.usage == {"input_tokens": 420, "output_tokens": 48}
+    assert row is not None and row.usage == {"input_tokens": 420, "output_tokens": 48, "model": "gemini-3.8-flash"}
     # nothing leaks the key
     assert FAKE_KEY not in body
     cfg = client.get(f"/api/deals/{demo['id']}/chat/config").json()
     assert FAKE_KEY not in json.dumps(cfg)
     assert cfg["provider"] == "gemini" and cfg["label"] == "Google Gemini" and cfg["live"] is True
     assert "Google Gemini (gemini-3.8-flash)" in cfg["note"] and [o["provider"] for o in cfg["options"]] == list(OPTION_ORDER)
-    assert cfg["models"] == list(REGISTRY["gemini"].models) and cfg["models"][0] == "gemini-3.8-flash"
+    # the picker is off by default: one model, no choice
+    assert cfg["models"] == ["gemini-3.8-flash"] and cfg["picker"] is False
 
 
 def test_no_tools_fallback(client, demo, db, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
@@ -447,10 +455,10 @@ def test_config_explains_unready_explicit_provider(client, demo, monkeypatch: py
 
 def test_config_in_mock_mode_has_contract_shape(client, demo, monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[no-untyped-def]
     cfg = client.get(f"/api/deals/{demo['id']}/chat/config").json()
-    assert set(cfg) == {"provider", "label", "model", "live", "note", "suggested", "models", "options"}
+    assert set(cfg) == {"provider", "label", "model", "live", "note", "suggested", "models", "picker", "options"}
     # the test suite pins BEARCASE_CHAT_PROVIDER=mock, which gets the explicit-selection note
     assert cfg["provider"] == "mock" and cfg["live"] is False and "rule-based composer" in cfg["note"]
-    assert cfg["models"] == ["rules-v1"] and len(cfg["suggested"]) == 6
+    assert cfg["models"] == ["rules-v1"] and cfg["picker"] is False and len(cfg["suggested"]) == 6
     assert "Explain DSCR like I'm new to this" in cfg["suggested"] and "Which documents are missing?" in cfg["suggested"]
     # auto mode with no key anywhere tells the user what to do
     from bearcase.api.routes import chat as chat_routes
@@ -544,7 +552,8 @@ def test_usage_is_requested_and_taken_once_per_request(client, demo, db, monkeyp
     events = _stream_once(client, demo, monkeypatch, script, "Which documents are missing?")
     assert seen and seen[0]["stream_options"] == {"include_usage": True}
     row = db.get(ChatMessage, uuid.UUID(events[0][1]["message_id"]))
-    assert row is not None and row.usage == {"input_tokens": 100, "output_tokens": 3} and row.error is None
+    assert row is not None and row.error is None
+    assert row.usage == {"input_tokens": 100, "output_tokens": 3, "model": "gemini-3.8-flash"}
 
 
 def test_max_tool_rounds_is_reported_and_stored(client, demo, db, monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -606,16 +615,21 @@ def test_models_for_lists_provider_ids_default_first() -> None:
 
 def test_config_lists_models_for_the_live_backend_and_chat_model_first(client, demo, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     _install(monkeypatch, FakeClient(lambda n, kw: iter([])))
-    cfg = client.get(f"/api/deals/{demo['id']}/chat/config").json()
-    assert cfg["live"] is True and cfg["model"] == "gemini-3.8-flash"
-    assert cfg["models"][0] == "gemini-3.8-flash" and cfg["models"] == list(REGISTRY["gemini"].models)
     from bearcase.api.routes import chat as chat_routes
 
-    monkeypatch.setattr(chat_routes, "get_settings", lambda: settings(chat_model="gemini-2.5-flash-lite"))
+    # picker off (the default): the configured model and nothing to choose from
+    cfg = client.get(f"/api/deals/{demo['id']}/chat/config").json()
+    assert cfg["live"] is True and cfg["model"] == "gemini-3.8-flash"
+    assert cfg["models"] == ["gemini-3.8-flash"] and cfg["picker"] is False
+    # picker on: the provider's full list, default first
+    monkeypatch.setattr(chat_routes, "get_settings", lambda: settings(chat_model_picker=True))
+    cfg = client.get(f"/api/deals/{demo['id']}/chat/config").json()
+    assert cfg["picker"] is True and cfg["models"][0] == "gemini-3.8-flash" and cfg["models"] == list(REGISTRY["gemini"].models)
+    monkeypatch.setattr(chat_routes, "get_settings", lambda: settings(chat_model_picker=True, chat_model="gemini-2.5-flash-lite"))
     cfg = client.get(f"/api/deals/{demo['id']}/chat/config").json()
     assert cfg["models"][0] == "gemini-2.5-flash-lite" and cfg["models"].count("gemini-2.5-flash-lite") == 1
     assert len(cfg["models"]) == 5
-    monkeypatch.setattr(chat_routes, "get_settings", lambda: settings(chat_model="gemini-9-preview"))
+    monkeypatch.setattr(chat_routes, "get_settings", lambda: settings(chat_model_picker=True, chat_model="gemini-9-preview"))
     cfg = client.get(f"/api/deals/{demo['id']}/chat/config").json()
     assert cfg["models"][:2] == ["gemini-9-preview", "gemini-3.8-flash"] and len(cfg["models"]) == 6
     assert FAKE_KEY not in json.dumps(cfg)
@@ -950,3 +964,373 @@ def test_disconnect_mid_stream_persists_a_stopped_reply(db, demo) -> None:  # ty
     db.expire_all()
     assert [(m.role, bool(m.error)) for m in thread.messages] == [("user", False), ("assistant", True)] * 2
     assert [m["role"] for m in chat_service._history(thread)] == ["user"]
+
+
+# ---- speed and resilience: fast failure, the fallback chain, request knobs, the brief ------------------------
+
+
+GENERAL = "In general, a covenant is a promise the borrower makes to the lender."
+
+
+def _busy(status: int = 503, message: str = "The model is overloaded. Please try again later.") -> openai.APIStatusError:
+    response = httpx.Response(status, request=httpx.Request("POST", "https://x"))
+    body = {"error": {"message": message, "status": "UNAVAILABLE"}}
+    if status >= 500:
+        return openai.InternalServerError(message, response=response, body=body)
+    return openai.APIStatusError(message, response=response, body=body)
+
+
+def _answer(*pieces: str) -> Any:
+    return iter([*(_chunk(content=p) for p in pieces), _chunk(finish_reason="stop"), _usage_chunk(50, 10)])
+
+
+def _backend(name: str, model: str = "m") -> ChatBackend:
+    return ChatBackend(
+        name=name,
+        label=name,
+        kind="openai_compat",
+        model=model,
+        base_url=None,
+        api_key="k",
+        ready=True,
+        reason=None,
+        free_tier=True,
+    )
+
+
+def test_busy_model_switches_to_the_next_in_the_chain(client, demo, db, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    def script(n: int, kwargs: dict[str, Any]) -> Any:
+        if n == 1:
+            raise _busy(503, "The model is overloaded due to high demand")
+        return _answer(GENERAL)
+
+    fake = FakeClient(script)
+    _install(monkeypatch, fake)
+    url = f"/api/deals/{demo['id']}/chat"
+    with client.stream("POST", url, json={"message": "What is a covenant?"}) as resp:
+        body = "".join(resp.iter_text())
+    events = _events(body)
+    assert [e for e, _ in events] == ["meta", "switch", "text", "citations", "done"]
+    meta = events[0][1]
+    assert meta["model"] == "gemini-3.8-flash"  # what was asked for; the switch and done say what answered
+    assert events[1][1] == {
+        "from": "gemini-3.8-flash",
+        "to": "gemini-3.7-flash",
+        "message": "gemini-3.8-flash is busy; answering with gemini-3.7-flash.",
+    }
+    done = events[-1][1]
+    assert done["model"] == "gemini-3.7-flash" and done["error"] is None and done["content"] == GENERAL
+    calls = fake.chat.completions.calls
+    assert [c["model"] for c in calls] == ["gemini-3.8-flash", "gemini-3.7-flash"]
+    assert calls[0]["messages"] == calls[1]["messages"]  # the next model starts from the same prompt
+    thread = client.get(f"/api/deals/{demo['id']}/chat/threads/{meta['thread_id']}").json()
+    assert [(m["role"], m["model"]) for m in thread["messages"]] == [
+        ("user", "gemini-3.7-flash"),
+        ("assistant", "gemini-3.7-flash"),
+    ]
+    row = db.get(ChatMessage, uuid.UUID(meta["message_id"]))
+    assert row is not None and row.usage == {"model": "gemini-3.7-flash", "input_tokens": 50, "output_tokens": 10}
+    audit = db.scalar(select(AuditEvent).where(AuditEvent.object_id == row.id, AuditEvent.event_type == "chat.reply"))
+    assert audit is not None and "gemini/gemini-3.7-flash" in audit.summary
+    assert FAKE_KEY not in body
+
+
+def test_rate_limit_never_switches(client, demo, db, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    def script(n: int, kwargs: dict[str, Any]) -> Any:
+        raise openai.RateLimitError(
+            "Resource exhausted: the model is unavailable under high demand",
+            response=httpx.Response(429, request=httpx.Request("POST", "https://x")),
+            body=None,
+        )
+
+    fake = FakeClient(script)
+    _install(monkeypatch, fake)
+    events = _stream_once(client, demo, monkeypatch, script, "What is a covenant?")
+    names = [e for e, _ in events]
+    assert "switch" not in names and "error" in names
+    assert "rate limit" in next(d for e, d in events if e == "error")["message"]
+    done = events[-1][1]
+    assert done["model"] == "gemini-3.8-flash" and done["error"]
+    row = db.get(ChatMessage, uuid.UUID(events[0][1]["message_id"]))
+    assert row is not None and row.model == "gemini-3.8-flash" and row.usage == {"model": "gemini-3.8-flash"}
+
+
+def test_no_switch_once_text_has_streamed(client, demo, db, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    def broken() -> Any:
+        yield _chunk(content="Adjusted EBITDA was reduced because")
+        raise _busy(503)
+
+    fake = FakeClient(lambda n, kw: broken())
+    _install(monkeypatch, fake)
+    with client.stream("POST", f"/api/deals/{demo['id']}/chat", json={"message": "Why was adjusted EBITDA reduced?"}) as resp:
+        events = _events("".join(resp.iter_text()))
+    names = [e for e, _ in events]
+    assert "switch" not in names and names.index("text") < names.index("error")
+    assert "temporarily unavailable" in next(d for e, d in events if e == "error")["message"]
+    done = events[-1][1]
+    assert done["content"].startswith("Adjusted EBITDA") and done["model"] == "gemini-3.8-flash" and done["error"]
+    assert len(fake.chat.completions.calls) == 1
+    row = db.get(ChatMessage, uuid.UUID(events[0][1]["message_id"]))
+    assert row is not None and row.error and row.content.startswith("Adjusted EBITDA")
+
+
+def test_no_switch_after_a_tool_round(client, demo, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    def script(n: int, kwargs: dict[str, Any]) -> Any:
+        if n == 1:
+            return iter([_chunk(tool_calls=[_tc(0, "call_1", "get_findings", "{}")]), _chunk(finish_reason="tool_calls")])
+        raise _busy(502)
+
+    fake = FakeClient(script)
+    _install(monkeypatch, fake)
+    with client.stream("POST", f"/api/deals/{demo['id']}/chat", json={"message": "What are the biggest risks?"}) as resp:
+        events = _events("".join(resp.iter_text()))
+    names = [e for e, _ in events]
+    assert "tool" in names and "switch" not in names and "error" in names
+    assert [c["model"] for c in fake.chat.completions.calls] == ["gemini-3.8-flash", "gemini-3.8-flash"]
+    assert events[-1][1]["model"] == "gemini-3.8-flash"
+
+
+def test_exhausted_chain_reports_the_last_error(client, demo, db, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    def script(n: int, kwargs: dict[str, Any]) -> Any:
+        raise _busy(503 if n < 4 else 504, f"attempt {n} failed")
+
+    fake = FakeClient(script)
+    _install(monkeypatch, fake)
+    with client.stream("POST", f"/api/deals/{demo['id']}/chat", json={"message": "What is a covenant?"}) as resp:
+        body = "".join(resp.iter_text())
+    events = _events(body)
+    chain = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
+    switches = [d for e, d in events if e == "switch"]
+    assert [(d["from"], d["to"]) for d in switches] == list(pairwise(chain))
+    assert [c["model"] for c in fake.chat.completions.calls] == chain
+    error = next(d for e, d in events if e == "error")
+    assert "temporarily unavailable" in error["message"] and "attempt" not in error["message"]
+    done = events[-1][1]
+    assert done["model"] == "gemini-3.5-flash-lite" and done["error"] and done["content"] == ""
+    row = db.get(ChatMessage, uuid.UUID(events[0][1]["message_id"]))
+    assert row is not None and row.model == "gemini-3.5-flash-lite" and row.error
+    assert FAKE_KEY not in body
+
+
+def test_fallback_can_be_switched_off(client, demo, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(chat_service, "get_settings", lambda: settings(chat_model_fallback=False))
+    fake = FakeClient(lambda n, kw: (_ for _ in ()).throw(_busy(503)))
+    _install(monkeypatch, fake)
+    with client.stream("POST", f"/api/deals/{demo['id']}/chat", json={"message": "What is a covenant?"}) as resp:
+        events = _events("".join(resp.iter_text()))
+    names = [e for e, _ in events]
+    assert "switch" not in names and "error" in names and len(fake.chat.completions.calls) == 1
+
+
+def test_rejected_request_knob_is_dropped_and_the_round_retried(client, demo, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    def script(n: int, kwargs: dict[str, Any]) -> Any:
+        if n == 1:
+            raise openai.BadRequestError(
+                "Unsupported parameter: 'reasoning_effort' is not supported with this model.",
+                response=httpx.Response(400, request=httpx.Request("POST", "https://x")),
+                body=None,
+            )
+        return _answer(GENERAL)
+
+    fake = FakeClient(script)
+    _install(monkeypatch, fake)
+    with client.stream("POST", f"/api/deals/{demo['id']}/chat", json={"message": "What is a covenant?"}) as resp:
+        events = _events("".join(resp.iter_text()))
+    names = [e for e, _ in events]
+    assert "switch" not in names and "error" not in names and "tool" not in names
+    calls = fake.chat.completions.calls
+    assert len(calls) == 2 and "reasoning_effort" in calls[0] and "reasoning_effort" not in calls[1]
+    assert calls[1]["max_tokens"] == 2048 and "tools" in calls[1] and calls[1]["model"] == "gemini-3.8-flash"
+    assert events[-1][1]["content"] == GENERAL and events[-1][1]["error"] is None
+    # a 400 that names nothing we sent is a real error, reported once
+    fake = FakeClient(
+        lambda n, kw: (_ for _ in ()).throw(
+            openai.BadRequestError(
+                "bad request", response=httpx.Response(400, request=httpx.Request("POST", "https://x")), body=None
+            )
+        )
+    )
+    _install(monkeypatch, fake)
+    with client.stream("POST", f"/api/deals/{demo['id']}/chat", json={"message": "What is a covenant?"}) as resp:
+        events = _events("".join(resp.iter_text()))
+    assert "error" in [e for e, _ in events] and len(fake.chat.completions.calls) == 1
+
+
+def test_request_params_per_provider() -> None:
+    s = settings(chat_max_output_tokens=777, chat_reasoning_effort="none")
+    assert openai_compat.request_params(_backend("openai"), s) == {"max_completion_tokens": 777, "reasoning_effort": "none"}
+    assert openai_compat.request_params(_backend("gemini"), s) == {"max_tokens": 777, "reasoning_effort": "none"}
+    assert openai_compat.request_params(_backend("groq"), s) == {"max_tokens": 777, "reasoning_effort": "none"}
+    for name in ("openrouter", "ollama", "custom"):
+        assert openai_compat.request_params(_backend(name), s) == {"max_tokens": 777}, name
+    assert openai_compat.request_params(GEMINI, settings()) == {"max_tokens": 2048, "reasoning_effort": "low"}
+    with pytest.raises(ValueError):
+        settings(chat_reasoning_effort="max")
+    with pytest.raises(ValueError):
+        settings(chat_max_output_tokens=1)
+
+
+def test_chat_client_fails_fast() -> None:
+    c = openai_compat.make_client(GEMINI)
+    assert c.timeout == 45.0 and c.max_retries == 1 and str(c.base_url).startswith("https://generativelanguage")
+    assert chat_service.CHAT_TIMEOUT_SECONDS == 45.0 and chat_service.CHAT_MAX_RETRIES == 1
+    proxied = openai_compat.make_client(resolve_chat_backend(settings(openrouter_api_key=FAKE_KEY)))
+    assert proxied.max_retries == 1 and proxied.default_headers.get("X-Title") == "BearCase"
+
+
+def test_fallback_chain_per_provider() -> None:
+    from bearcase.chat.providers import fallback_chain
+
+    assert fallback_chain(GEMINI) == ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
+    assert fallback_chain(MOCK_BACKEND) == ["rules-v1"]
+    assert fallback_chain(resolve_chat_backend(settings(groq_api_key="k"))) == ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+    assert fallback_chain(resolve_chat_backend(settings(openai_api_key="k"))) == ["gpt-5.6-luna", "gpt-4.1-mini"]
+    assert fallback_chain(resolve_chat_backend(settings(anthropic_api_key="k"))) == ["claude-haiku-4-5", "claude-sonnet-5"]
+    openrouter = fallback_chain(resolve_chat_backend(settings(openrouter_api_key="k")))
+    assert (
+        openrouter == list(REGISTRY["openrouter"].fallback)
+        and len(openrouter) == 4
+        and all(m.endswith(":free") for m in openrouter)
+    )
+    assert fallback_chain(resolve_chat_backend(settings(chat_provider="ollama"))) == ["qwen3:8b"]
+    custom = resolve_chat_backend(
+        settings(chat_provider="custom", chat_base_url="http://localhost:1234/v1", chat_model="local-model")
+    )
+    assert fallback_chain(custom) == ["local-model"]
+    # an overridden model leads and the provider's chain follows, without repeats
+    import dataclasses
+
+    assert fallback_chain(dataclasses.replace(GEMINI, model="gemini-3.6-flash")) == [
+        "gemini-3.6-flash",
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash-lite",
+    ]
+    assert chat_service.next_in_chain(["a", "b"], "a") == "b" and chat_service.next_in_chain(["a", "b"], "b") is None
+    assert chat_service.next_in_chain(["a"], "x") is None
+    for spec in REGISTRY.values():
+        assert all(validate_model_id(m) for m in spec.fallback)
+        if spec.fallback:
+            assert spec.fallback[0] == spec.default_model
+    # the fallback tuple is not part of the public options (the panel offers `models`, never the chain)
+    assert all("fallback" not in o for o in public_options())
+
+
+def test_busy_error_classification() -> None:
+    req = httpx.Request("POST", "https://x")
+    busy = chat_service.busy_error
+    assert busy(openai.InternalServerError("x", response=httpx.Response(503, request=req), body=None))
+    for status in (500, 502, 504, 529):
+        assert busy(openai.APIStatusError("x", response=httpx.Response(status, request=req), body=None)), status
+    limited = openai.RateLimitError("model unavailable due to high demand", response=httpx.Response(429, request=req), body=None)
+    assert not busy(limited)
+    assert busy(openai.BadRequestError("The model is overloaded", response=httpx.Response(400, request=req), body=None))
+    assert not busy(openai.BadRequestError("bad json", response=httpx.Response(400, request=req), body=None))
+    assert not busy(openai.AuthenticationError("bad key", response=httpx.Response(401, request=req), body=None))
+    assert not busy(openai.APIConnectionError(request=req))
+    assert not busy(RuntimeError("boom")) and busy(RuntimeError("service unavailable"))
+
+
+ANTHROPIC = ChatBackend(
+    name="anthropic",
+    label="Anthropic Claude",
+    kind="anthropic",
+    model="claude-haiku-4-5",
+    base_url=None,
+    api_key=FAKE_KEY,
+    ready=True,
+    reason=None,
+    free_tier=False,
+)
+
+
+class FakeAnthropicStream:
+    def __init__(self, texts: list[str], stop_reason: str = "end_turn") -> None:
+        self._texts = texts
+        self.stop_reason = stop_reason
+
+    def __enter__(self) -> FakeAnthropicStream:
+        return self
+
+    def __exit__(self, *exc: Any) -> bool:
+        return False
+
+    @property
+    def text_stream(self) -> Any:
+        yield from self._texts
+
+    def get_final_message(self) -> Any:
+        usage = types.SimpleNamespace(input_tokens=30, output_tokens=7)
+        return types.SimpleNamespace(usage=usage, stop_reason=self.stop_reason, content=[])
+
+
+class FakeAnthropic:
+    def __init__(self, script: Any) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.script = script
+        self.messages = types.SimpleNamespace(stream=self._stream)
+
+    def _stream(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        return self.script(len(self.calls), kwargs)
+
+
+def test_anthropic_loop_reads_the_brief_caps_output_and_switches_on_overload(client, demo, db, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import anthropic
+
+    def script(n: int, kwargs: dict[str, Any]) -> Any:
+        if n == 1:
+            raise anthropic.APIStatusError(
+                "Overloaded",
+                response=httpx.Response(529, request=httpx.Request("POST", "https://x")),
+                body={"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}},
+            )
+        return FakeAnthropicStream([GENERAL])
+
+    fake = FakeAnthropic(script)
+    constructed: list[dict[str, Any]] = []
+
+    def build(**kwargs: Any) -> FakeAnthropic:
+        constructed.append(kwargs)
+        return fake
+
+    monkeypatch.setattr(anthropic, "Anthropic", build)
+    monkeypatch.setattr(chat_service, "resolve_chat_backend", lambda settings=None: ANTHROPIC)
+    monkeypatch.setattr("bearcase.api.routes.chat.resolve_chat_backend", lambda settings=None: ANTHROPIC)
+    with client.stream("POST", f"/api/deals/{demo['id']}/chat", json={"message": "What is a covenant?"}) as resp:
+        body = "".join(resp.iter_text())
+    events = _events(body)
+    assert [e for e, _ in events] == ["meta", "switch", "text", "citations", "done"]
+    assert events[0][1]["provider"] == "anthropic" and events[0][1]["model"] == "claude-haiku-4-5"
+    assert events[1][1]["from"] == "claude-haiku-4-5" and events[1][1]["to"] == "claude-sonnet-5"
+    done = events[-1][1]
+    assert done["model"] == "claude-sonnet-5" and done["error"] is None and done["content"] == GENERAL
+    assert constructed and constructed[0]["timeout"] == 45.0 and constructed[0]["max_retries"] == 1
+    assert [c["model"] for c in fake.calls] == ["claude-haiku-4-5", "claude-sonnet-5"]
+    for c in fake.calls:
+        assert c["max_tokens"] == 2048 and c["tools"] == TOOLS
+        assert "## Deal brief" in c["system"] and "<deal_brief>" in c["system"] and "Deal: Northstar" in c["system"]
+    row = db.get(ChatMessage, uuid.UUID(events[0][1]["message_id"]))
+    assert row is not None and row.model == "claude-sonnet-5" and row.provider == "anthropic"
+    assert row.usage == {"model": "claude-sonnet-5", "input_tokens": 30, "output_tokens": 7}
+    assert FAKE_KEY not in body
+
+
+def test_per_model_daily_quota_429_hands_over_to_the_next_model() -> None:
+    req = httpx.Request("POST", "https://x")
+    per_model = openai.RateLimitError(
+        "You exceeded your current quota",
+        response=httpx.Response(429, request=req),
+        body={"error": {"details": [{"violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}]}},
+    )
+    assert chat_service.busy_error(per_model) is True
+    project_wide = openai.RateLimitError("Too many requests", response=httpx.Response(429, request=req), body=None)
+    assert chat_service.busy_error(project_wide) is False
+
+
+def test_timeouts_and_connection_failures_hand_over_and_read_plainly() -> None:
+    req = httpx.Request("POST", "https://x")
+    assert chat_service.busy_error(openai.APITimeoutError(request=req)) is True
+    assert chat_service.busy_error(openai.APIConnectionError(request=req)) is True
+    text = chat_service.describe_error(openai.APITimeoutError(request=req), GEMINI)
+    assert "did not answer within" in text and "seconds" in text

@@ -2,8 +2,9 @@ import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ConnectModel, DealChat, MessageView, QUICK_PROMPTS, type ChatOption, type Msg } from "./deal-chat";
+import { ConnectModel, DealChat, MessageView, QUICK_PROMPTS, isRateLimit, type ChatConfig, type ChatOption, type Msg } from "./deal-chat";
 import { askTheDeal, getChatBusState, onChatPrompt, resetChatBus, setChatOpen, takeChatPrompt } from "@/lib/chat-bus";
+import { fmtDate } from "@/lib/format";
 
 // The renderer's internal parseBlocks call is a module-local binding, so the module's Markdown export is what a test
 // can make throw; the flag keeps every other test on the real renderer.
@@ -26,7 +27,9 @@ const E1 = "11111111-1111-4111-8111-111111111111";
 const M1 = "22222222-2222-4222-8222-222222222222";
 const EV = { id: E1, document_id: "d1", document_name: "cim.pdf", doc_type: "cim", locator: { page: 3 }, kind: "page", text: "" };
 const ME = { id: M1, key: "verified_adjusted_ebitda", label: "Verified adjusted EBITDA (USD)", value: "1810000", unit: "usd", formula: "reported_ebitda + accepted_adjustments" };
-const CONFIG = { provider: "mock", label: "Rule-based composer", model: "rules", models: ["rules"], live: false, note: "No model key is configured.", suggested: ["Why was adjusted EBITDA reduced?"], options: OPTIONS };
+const CONFIG: ChatConfig = { provider: "mock", label: "Rule-based composer", model: "rules", models: ["rules"], live: false, note: "No model key is configured.", suggested: ["Why was adjusted EBITDA reduced?"], options: OPTIONS };
+/** A connected provider offering two models; `picker` stays off unless a test turns it on. */
+const LIVE: ChatConfig = { ...CONFIG, provider: "gemini", label: "Google Gemini", model: "gemini-3.8-flash", models: ["gemini-3.8-flash", "gemini-3.7-flash"], live: true, note: "Live model: answers are drafted by Google Gemini (gemini-3.8-flash)." };
 const noop = () => {};
 afterEach(() => { cleanup(); resetChatBus(); vi.unstubAllGlobals(); });
 
@@ -35,8 +38,8 @@ function msg(overrides: Partial<Msg>): Msg {
 }
 
 describe("ConnectModel", () => {
-  it("lists options in API order with label link, env var, default model, and a plain 'free tier' marker", () => {
-    const { container, getAllByRole, getByText, queryAllByText } = render(<ConnectModel options={OPTIONS} />);
+  it("lists options in API order with label link, env var, and a plain 'free tier' marker, never a model id", () => {
+    const { container, getAllByRole, getByText, queryAllByText, queryByText } = render(<ConnectModel options={OPTIONS} />);
     expect(getByText("Connect a model")).toBeInTheDocument();
     expect(getByText("Add one key to .env in the repo root and restart the API. Free options first.")).toBeInTheDocument();
     const links = getAllByRole("link");
@@ -49,7 +52,7 @@ describe("ConnectModel", () => {
     const codes = Array.from(container.querySelectorAll("code"));
     expect(codes.map((c) => c.textContent)).toEqual(["GEMINI_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY"]);
     for (const c of codes) expect(c.className).toContain("font-mono");
-    expect(getByText("gemini-3.8-flash")).toBeInTheDocument();
+    expect(queryByText(/gemini-3\.8-flash|gpt-oss|gpt-5/)).toBeNull();
     expect(queryAllByText("free tier")).toHaveLength(2);
     expect(container.querySelector("svg")).toBeNull();
   });
@@ -60,13 +63,14 @@ describe("ConnectModel", () => {
 });
 
 describe("MessageView footer", () => {
-  it("shows the human label with the model when the stream meta carried one", () => {
-    const { getByText } = render(<ol><MessageView m={msg({ label: "Google Gemini" })} onOpen={noop} /></ol>);
-    expect(getByText("Google Gemini · gemini-3.8-flash")).toBeInTheDocument();
-  });
-  it("falls back to provider/model for persisted messages without a label", () => {
-    const { getByText } = render(<ol><MessageView m={msg({})} onOpen={noop} /></ol>);
-    expect(getByText("gemini/gemini-3.8-flash")).toBeInTheDocument();
+  it("names neither the provider nor the model, with or without a label, and keeps time, Copy, and Regenerate", () => {
+    const { queryByText, getByText, getByRole, rerender } = render(<ol><MessageView m={msg({ label: "Google Gemini" })} onOpen={noop} onRegenerate={noop} /></ol>);
+    expect(queryByText(/Google Gemini|gemini/i)).toBeNull();
+    expect(getByText(fmtDate("2026-09-06T10:00:00Z"))).toBeInTheDocument();
+    expect(getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(getByRole("button", { name: "Regenerate" })).toBeInTheDocument();
+    rerender(<ol><MessageView m={msg({ label: undefined })} onOpen={noop} /></ol>);
+    expect(queryByText(/gemini/i)).toBeNull();
   });
   it("counts the resolving citations for a grounded deal answer and asks for review, with the supported glyph", () => {
     const { getByText, container } = render(<ol><MessageView m={msg({ scope: "deal", grounded: true, citations: { evidence: [EV], metrics: [ME] } })} onOpen={noop} /></ol>);
@@ -108,6 +112,46 @@ describe("MessageView footer", () => {
   it("shows no verdict for a finished reply with no text", () => {
     const { queryByText } = render(<ol><MessageView m={msg({ content: "", error: "Stopped." })} onOpen={noop} /></ol>);
     expect(queryByText(/cited|General answer/)).toBeNull();
+  });
+});
+
+describe("MessageView progress", () => {
+  it("says Thinking before any tool starts, Reading the deal room once one has, and neither once text streams", () => {
+    const { getByRole, queryByRole, getByText, container, rerender } = render(<ol><MessageView m={msg({ streaming: true, content: "", tools: [] })} onOpen={noop} /></ol>);
+    expect(getByRole("status")).toHaveTextContent("Thinking…");
+    expect(container.querySelector(".animate-pulse")).not.toBeNull();
+    rerender(<ol><MessageView m={msg({ streaming: true, content: "", tools: ["Findings", "Metrics"] })} onOpen={noop} /></ol>);
+    expect(getByRole("status")).toHaveTextContent("Reading the deal room…");
+    expect(getByText("Findings, Metrics")).toBeInTheDocument();
+    expect(container.querySelector(".animate-pulse")).not.toBeNull();
+    rerender(<ol><MessageView m={msg({ streaming: true, content: "Revenue", tools: ["Findings"] })} onOpen={noop} /></ol>);
+    expect(queryByRole("status")).toBeNull();
+    expect(getByText("Revenue")).toBeInTheDocument();
+    expect(container.querySelector(".animate-pulse")).not.toBeNull();
+    rerender(<ol><MessageView m={msg({ content: "Revenue", tools: ["Findings"] })} onOpen={noop} /></ol>);
+    expect(queryByRole("status")).toBeNull();
+    expect(container.querySelector(".animate-pulse")).toBeNull();
+  });
+
+  it("shows a switch notice above the answer as one muted line", () => {
+    const { getByText } = render(<ol><MessageView m={msg({ notice: "Gemini 3.8 Flash is busy; answering with Gemini 3.7 Flash." })} onOpen={noop} /></ol>);
+    const note = getByText("Gemini 3.8 Flash is busy; answering with Gemini 3.7 Flash.");
+    expect(note.tagName).toBe("P");
+    expect(note.className).toContain("text-fg-muted");
+    expect(note.compareDocumentPosition(getByText("Revenue grew."))).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("shows a rate-limit error with the review glyph and the text unchanged; other errors keep the error tone", () => {
+    expect(isRateLimit("Too many requests. Try again in 30 seconds.")).toBe(true);
+    expect(isRateLimit("Google Gemini rate limit reached (free tier).")).toBe(true);
+    expect(isRateLimit("Stopped.")).toBe(false);
+    const { getByText, container, rerender } = render(<ol><MessageView m={msg({ content: "", error: "Too many requests. Try again in 30 seconds." })} onOpen={noop} /></ol>);
+    const err = getByText("Too many requests. Try again in 30 seconds.");
+    expect(err.className).not.toContain("text-red");
+    expect(err.querySelector("svg rect")).not.toBeNull();
+    rerender(<ol><MessageView m={msg({ content: "", error: "Request failed (500)" })} onOpen={noop} /></ol>);
+    expect(getByText("Request failed (500)").className).toContain("text-red");
+    expect(container.querySelector("svg rect")).toBeNull();
   });
 });
 
@@ -187,7 +231,7 @@ describe("MessageView actions", () => {
     const { getByText, getByRole, queryByRole, queryByText } = result!;
     const note = getByText("No reply was recorded.");
     expect(note.className).toContain("text-fg-muted");
-    expect(getByText("gemini/gemini-3.8-flash")).toBeInTheDocument();
+    expect(queryByText(/gemini/i)).toBeNull();
     expect(queryByRole("button", { name: "Copy" })).toBeNull();
     expect(queryByText(/cited|General answer/)).toBeNull();
     fireEvent.click(getByRole("button", { name: "Regenerate" }));
@@ -266,7 +310,8 @@ describe("chat bus", () => {
 });
 
 /** Same-origin API stand-in: chat config, thread list, thread detail, and a streamed reply that records what was posted. */
-function stubApi(reply = "Here is the answer.") {
+function stubApi(reply = "Here is the answer.", opts: { config?: Partial<ChatConfig>; before?: Array<[string, unknown]> } = {}) {
+  const config = { ...CONFIG, ...opts.config };
   const posts: Array<{ message: string; thread_id: string | null }> = [];
   const threads = new Map<string, Msg[]>();
   const sse = (events: Array<[string, unknown]>) => events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join("");
@@ -284,7 +329,8 @@ function stubApi(reply = "Here is the answer.") {
       list.push(row(`u${n}`, "user", body.message), row(`a${n}`, "assistant", reply));
       threads.set(tid, list);
       const frames = sse([
-        ["meta", { thread_id: tid, provider: "mock", model: "rules", label: "Rule-based composer" }],
+        ["meta", { thread_id: tid, provider: config.provider, model: config.model, label: config.label }],
+        ...(opts.before ?? []),
         ["tool", { name: "get_findings", label: "Findings", status: "start" }],
         ["text", { delta: reply }],
         ["citations", { evidence: [], metrics: [], scope: "deal" }],
@@ -292,7 +338,7 @@ function stubApi(reply = "Here is the answer.") {
       ]);
       return new Response(frames, { status: 200, headers: { "Content-Type": "text/event-stream" } });
     }
-    if (/\/chat\/config$/.test(url)) return Response.json(CONFIG);
+    if (/\/chat\/config$/.test(url)) return Response.json(config);
     if (/\/chat\/threads$/.test(url)) return Response.json([...threads.keys()].map((id) => ({ id, title: "Thread", created_at: stamp, updated_at: stamp, message_count: threads.get(id)?.length ?? 0 })));
     const detail = /\/chat\/threads\/([^/]+)$/.exec(url);
     if (detail && threads.has(detail[1])) return Response.json({ id: detail[1], title: "Thread", created_at: stamp, updated_at: stamp, message_count: threads.get(detail[1])?.length ?? 0, messages: threads.get(detail[1]) });
@@ -321,7 +367,7 @@ describe("DealChat panel", () => {
     await waitFor(() => expect(document.activeElement).toBe(input));
     expect((input as HTMLTextAreaElement).selectionStart).toBe("Explain this finding: Owner salary add-back of $180,000".length);
     expect(getChatBusState()).toEqual({ open: true, prompt: null });
-    expect(await screen.findByText("Demo mode · rule-based answers")).toBeInTheDocument();
+    expect(await screen.findByText("Offline mode: rule-based answers")).toBeInTheDocument();
     expect(posts).toHaveLength(0);
   });
 
@@ -367,18 +413,57 @@ describe("DealChat panel", () => {
     const { posts } = stubApi("Resumed reply.");
     renderChat("deal-resume");
     act(() => { askTheDeal("Which documents are missing?", { send: true }); });
-    await screen.findByText("Resumed reply.");
+    await screen.findByText("Resumed reply.", {}, { timeout: 5000 });
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), { timeout: 5000 });
     fireEvent.click(screen.getByRole("button", { name: /Ask the deal/ }));
-    expect(await screen.findByText("Resumed reply.")).toBeInTheDocument();
+    expect(await screen.findByText("Resumed reply.", {}, { timeout: 5000 })).toBeInTheDocument();
     expect(posts).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), { timeout: 5000 });
     act(() => { askTheDeal("And the contracts?", { send: true }); });
-    await waitFor(() => expect(posts).toHaveLength(2));
+    await waitFor(() => expect(posts).toHaveLength(2), { timeout: 5000 });
     expect(posts[1]).toEqual({ message: "And the contracts?", thread_id: "t1" });
-    expect(await screen.findAllByText("Resumed reply.")).toHaveLength(2);
+    expect(await screen.findAllByText("Resumed reply.", {}, { timeout: 5000 })).toHaveLength(2);
+  });
+
+  it("names no provider or model when live and hides the model picker unless the server opts in", async () => {
+    stubApi("Answer.", { config: LIVE });
+    renderChat("deal-live");
+    fireEvent.click(screen.getByRole("button", { name: /Ask the deal/ }));
+    expect(await screen.findByText("Answers drawn from the deal room, with citations")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
+    expect(screen.queryByText(/gemini|Google Gemini/i)).toBeNull();
+    expect(screen.queryByText("Connect a model")).toBeNull();
+  });
+
+  it("shows the model picker when the server sets picker with more than one model", async () => {
+    stubApi("Answer.", { config: { ...LIVE, picker: true } });
+    renderChat("deal-picker");
+    fireEvent.click(screen.getByRole("button", { name: /Ask the deal/ }));
+    const picker = await screen.findByRole("combobox", { name: "Model" });
+    expect(within(picker).getAllByRole("option").map((o) => o.textContent)).toEqual(["gemini-3.8-flash", "gemini-3.7-flash"]);
+    expect(screen.getByText("Answers drawn from the deal room, with citations")).toBeInTheDocument();
+  });
+
+  it("keeps the picker hidden when picker is set but only one model is offered", async () => {
+    stubApi("Answer.", { config: { ...LIVE, picker: true, models: ["gemini-3.8-flash"] } });
+    renderChat("deal-one-model");
+    fireEvent.click(screen.getByRole("button", { name: /Ask the deal/ }));
+    await screen.findByText("Answers drawn from the deal room, with citations");
+    expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
+  });
+
+  it("renders a switch notice from the stream above the answer, and the footer still names no model", async () => {
+    const { posts } = stubApi("Fallback answer.", { config: LIVE, before: [["switch", { from: "gemini-3.8-flash", to: "gemini-3.7-flash", message: "Gemini 3.8 Flash is busy; answering with Gemini 3.7 Flash." }]] });
+    renderChat("deal-switch");
+    act(() => { askTheDeal("What is missing?", { send: true }); });
+    await waitFor(() => expect(posts).toHaveLength(1), { timeout: 5000 });
+    const notice = await screen.findByText("Gemini 3.8 Flash is busy; answering with Gemini 3.7 Flash.");
+    const answer = await screen.findByText("Fallback answer.");
+    expect(notice.compareDocumentPosition(answer)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.queryByText(/gemini-3\.[78]-flash/)).toBeNull();
   });
 
   it("drops a prompt when the panel is closed before it was taken", async () => {

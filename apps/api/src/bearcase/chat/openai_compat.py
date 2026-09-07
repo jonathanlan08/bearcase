@@ -1,10 +1,16 @@
 """Tool-use loop over any OpenAI-compatible chat completions endpoint (OpenAI, Gemini, Groq, OpenRouter,
 Ollama, custom servers). Mirrors the Anthropic loop in chat/service.py event for event: the same tools,
-the same SSE shapes, and the same citation validation afterwards. Only the wire format differs.
+the same SSE shapes (meta, tool, text, switch, error, citations, done), and the same citation validation
+afterwards. Only the wire format differs.
 
 Tool-call deltas are merged defensively because providers disagree on the details: some send an index on
 every delta, some send a whole call in one chunk, some omit ids. Models that reject tools altogether get a
-grounded no-tools fallback where the deal data is pre-fetched and supplied in the user turn as delimited data."""
+grounded no-tools fallback where the deal data is pre-fetched and supplied in the user turn as delimited data.
+
+Speed and resilience (free tiers): the client fails fast (one retry, 45 s); the deal brief in the system
+prompt makes most replies a single request; output is capped and thinking effort is low; and when the first
+request of a reply fails with a 5xx or an overloaded message, the next model in the provider's fallback chain
+answers instead (a "switch" event tells the reader). A 429 never switches: the quota is shared."""
 
 from __future__ import annotations
 
@@ -16,10 +22,22 @@ from typing import Any, cast
 import openai
 from sqlalchemy.orm import Session
 
+from bearcase.chat.brief import build_brief
 from bearcase.chat.providers import ChatBackend
-from bearcase.chat.service import MAX_TOOL_ROUNDS, ModelStoppedError, sse, system_prompt
+from bearcase.chat.service import (
+    CHAT_MAX_RETRIES,
+    CHAT_TIMEOUT_SECONDS,
+    MAX_TOOL_ROUNDS,
+    ModelStoppedError,
+    busy_error,
+    models_to_try,
+    next_in_chain,
+    sse,
+    switch_event,
+    system_prompt,
+)
 from bearcase.chat.tools import TOOL_LABELS, TOOLS, run_tool
-from bearcase.config import get_settings
+from bearcase.config import Settings, get_settings
 from bearcase.models import Deal
 
 TOOL_RESULT_MAX_CHARS = 60000
@@ -28,11 +46,28 @@ NO_TOOLS_READS: tuple[str, ...] = ("list_claims", "get_adjustments", "get_financ
 _TOOL_REJECTION_ERRORS = (openai.BadRequestError, openai.NotFoundError, openai.UnprocessableEntityError)
 # Providers verified to accept stream_options.include_usage; others get no usage rather than a 400.
 USAGE_PROVIDERS = frozenset({"openai", "gemini", "groq", "openrouter"})
+# Providers whose OpenAI-compatible endpoint accepts reasoning_effort. Ollama, OpenRouter, and custom servers
+# front many models and reject or ignore it unpredictably, so they never receive it.
+REASONING_PROVIDERS = frozenset({"gemini", "openai", "groq"})
 _NORMAL_FINISH = frozenset({"stop", "tool_calls", "function_call"})
 
 
 def _stream_extra(backend: ChatBackend) -> dict[str, Any]:
     return {"stream_options": {"include_usage": True}} if backend.name in USAGE_PROVIDERS else {}
+
+
+def request_params(backend: ChatBackend, settings: Settings | None = None) -> dict[str, Any]:
+    """Per-request knobs from settings: the output cap (max_completion_tokens for OpenAI, which deprecated
+    max_tokens; max_tokens everywhere else) and, for providers that accept it, the reasoning effort."""
+    s = settings or get_settings()
+    params: dict[str, Any] = {}
+    if backend.name == "openai":
+        params["max_completion_tokens"] = s.chat_max_output_tokens
+    else:
+        params["max_tokens"] = s.chat_max_output_tokens
+    if backend.name in REASONING_PROVIDERS:
+        params["reasoning_effort"] = s.chat_reasoning_effort
+    return params
 
 
 def _check_finish(finish: str | None, round_text: list[str], text_parts: list[str]) -> None:
@@ -45,13 +80,14 @@ def _check_finish(finish: str | None, round_text: list[str], text_parts: list[st
 
 
 def make_client(backend: ChatBackend) -> openai.OpenAI:
-    s = get_settings()
+    """A client that fails fast: one retry and 45 s, so a dead model hands over to the next one within a
+    minute instead of spending it inside the SDK's default retry ladder."""
     headers = {"X-Title": "BearCase"} if backend.name == "openrouter" else None
     return openai.OpenAI(
         api_key=backend.api_key,
         base_url=backend.base_url,
-        timeout=s.ai_timeout_seconds,
-        max_retries=s.ai_max_retries,
+        timeout=CHAT_TIMEOUT_SECONDS,
+        max_retries=CHAT_MAX_RETRIES,
         default_headers=headers,
     )
 
@@ -157,10 +193,31 @@ def _read_stream(
             _merge_tool_call(pending, tc)
 
 
-def _mentions_tools(exc: BaseException) -> bool:
+def _error_text(exc: BaseException) -> str:
     body = getattr(exc, "body", None)
-    text = f"{getattr(exc, 'message', '')} {exc} {json.dumps(body, default=str) if body else ''}".lower()
+    return f"{getattr(exc, 'message', '')} {exc} {json.dumps(body, default=str) if body else ''}".lower()
+
+
+def _mentions_tools(exc: BaseException) -> bool:
+    text = _error_text(exc)
     return "tool" in text or "function" in text
+
+
+def _untouched(round_no: int, text_parts: list[str], pending: list[dict[str, Any]]) -> bool:
+    """True while nothing of the reply has arrived: the first request, and no text or tool-call delta read from
+    it. Evaluated when a failure happens, because a stream can break after output has already started."""
+    return round_no == 0 and not text_parts and not pending
+
+
+def _drop_rejected_params(exc: BaseException, params: dict[str, Any]) -> list[str]:
+    """Remove from `params` every optional knob a 400 names (a model that takes no reasoning_effort, a server
+    that wants max_tokens spelled differently) and return what was dropped, so the round can be retried once
+    with a plainer request instead of failing the reply."""
+    text = _error_text(exc)
+    dropped = [name for name in list(params) if name in text]
+    for name in dropped:
+        params.pop(name)
+    return dropped
 
 
 def openai_compat_loop(
@@ -173,24 +230,43 @@ def openai_compat_loop(
     usage: dict[str, Any],
 ) -> Iterator[str]:
     client = make_client(backend)
-    system = system_prompt(deal)
+    system = system_prompt(deal, build_brief(db, deal))
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}, *history]
     tools = openai_tools()
     extra = _stream_extra(backend)
-    for round_no in range(MAX_TOOL_ROUNDS + 1):
+    params = request_params(backend)
+    chain = models_to_try(backend)
+    model = usage["model"] = chain[0]
+    round_no = 0
+    while round_no <= MAX_TOOL_ROUNDS:
         round_text: list[str] = []
         pending: list[dict[str, Any]] = []
         state: dict[str, Any] = {}
         try:
             stream = client.chat.completions.create(
-                model=backend.model, messages=cast(Any, messages), tools=cast(Any, tools), stream=True, **extra
+                model=model, messages=cast(Any, messages), tools=cast(Any, tools), stream=True, **params, **extra
             )
             yield from _read_stream(stream, text_parts, round_text, pending, state)
         except _TOOL_REJECTION_ERRORS as exc:
-            if round_no == 0 and not text_parts and not pending and _mentions_tools(exc):
-                yield from _grounded_without_tools(client, db, deal, backend, history, system, text_parts, tool_calls, usage)
+            if _untouched(round_no, text_parts, pending) and _mentions_tools(exc):
+                yield from _grounded_without_tools(
+                    client, db, deal, backend, history, system, text_parts, tool_calls, usage, model, params
+                )
                 return
+            if _untouched(round_no, text_parts, pending) and _drop_rejected_params(exc, params):
+                continue  # same model, same round, without the knob the provider refused
             raise
+        except openai.APIStatusError as exc:
+            # Only the first request of a reply switches: the next model starts from the same prompt. Later
+            # rounds carry state (tool results, partial text) the next model never saw.
+            busy = _untouched(round_no, text_parts, pending) and busy_error(exc)
+            following = next_in_chain(chain, model) if busy else None
+            if following is None:
+                raise
+            yield switch_event(model, following)
+            model = usage["model"] = following
+            continue
+        round_no += 1
         if state.get("usage") is not None:
             _add_usage(usage, state["usage"])
         calls = [p for p in pending if p["name"]]
@@ -238,8 +314,10 @@ def _grounded_without_tools(
     text_parts: list[str],
     tool_calls: list[dict[str, Any]],
     usage: dict[str, Any],
+    model: str,
+    params: dict[str, Any],
 ) -> Iterator[str]:
-    """For models that reject tool definitions: read the deal once, put the results in the system prompt,
+    """For models that reject tool definitions: read the deal once, put the results in the user turn,
     and make one plain streaming request. The reads are the same persisted-row tools; nothing is calculated."""
     usage["mode"] = "no_tools"
     latest_user = next((m["content"] for m in reversed(history) if m["role"] == "user"), "")
@@ -276,7 +354,7 @@ def _grounded_without_tools(
     state: dict[str, Any] = {}
     round_text: list[str] = []
     stream = client.chat.completions.create(
-        model=backend.model, messages=cast(Any, messages), stream=True, **_stream_extra(backend)
+        model=model, messages=cast(Any, messages), stream=True, **params, **_stream_extra(backend)
     )
     yield from _read_stream(stream, text_parts, round_text, [], state)
     if state.get("usage") is not None:

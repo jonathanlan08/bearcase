@@ -4,6 +4,8 @@ or the repo-root .env file."""
 
 from __future__ import annotations
 
+import logging
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -12,6 +14,7 @@ from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
+log = logging.getLogger("bearcase.config")
 
 
 class Settings(BaseSettings):
@@ -46,6 +49,26 @@ class Settings(BaseSettings):
         default=None, description="OpenAI-compatible base URL for chat_provider=custom (or a proxy for a named provider)."
     )
     chat_api_key: str | None = Field(default=None, description="API key for chat_provider=custom.")
+    # Chat speed and resilience. Free tiers are slow and rate limited, so one reply should cost as few
+    # provider requests as possible and a busy model should hand over to the next one instead of retrying.
+    chat_model_picker: bool = Field(
+        default=False,
+        description="Offer a model picker in the chat panel. Off: the configured default model answers everyone.",
+    )
+    chat_max_output_tokens: int = Field(default=2048, ge=64, description="Output cap per chat request.")
+    chat_reasoning_effort: Literal["none", "low", "medium", "high"] = Field(
+        default="low", description="Thinking effort sent to providers that accept it (gemini, openai, groq)."
+    )
+    chat_model_fallback: bool = Field(
+        default=True,
+        description="When the first request of a reply fails with a 5xx or an overloaded message, answer with the next "
+        "model in the provider's fallback chain (chat/providers.py). A 429 never switches: the quota is shared.",
+    )
+    chat_brief_ttl_seconds: int = Field(
+        default=300,
+        ge=0,
+        description="How long a cached deal brief (chat/brief.py) is trusted before its version stamp is rechecked.",
+    )
 
     # Provider keys: BEARCASE_-prefixed or native names, from the environment or .env. Never logged.
     anthropic_api_key: str | None = Field(
@@ -115,9 +138,80 @@ class Settings(BaseSettings):
             self.rate_limit_enabled = False
         return self
 
+    @model_validator(mode="after")
+    def _normalize_database_url(self) -> Settings:
+        # Hosted PostgreSQL (Render, Neon, Supabase, Heroku-style) hands out postgres:// or postgresql:// URLs.
+        # SQLAlchemy dropped the first and maps the second to psycopg2, which is not installed; the supported
+        # driver is psycopg 3 (the `postgres` extra), so both are rewritten to its dialect name.
+        for prefix in ("postgres://", "postgresql://"):
+            if self.database_url.startswith(prefix):
+                self.database_url = "postgresql+psycopg://" + self.database_url[len(prefix) :]
+        return self
+
+    @model_validator(mode="after")
+    def _refuse_unsafe_production(self) -> Settings:
+        # A production process must not sign sessions with the string that is in this repository. The other
+        # soft spots (see production_warnings) are logged so a deployment that chose them on purpose still starts.
+        if self.env != "production":
+            return self
+        if self.secret_key == type(self).model_fields["secret_key"].default:
+            raise ValueError(
+                "BEARCASE_SECRET_KEY is the development default; BEARCASE_ENV=production needs a long random value, "
+                "for example the output of: python -c 'import secrets; print(secrets.token_urlsafe(48))'"
+            )
+        for message in production_warnings(self):
+            log.warning(message)
+        return self
+
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
+
+
+def has_chat_credentials(settings: Settings) -> bool:
+    """True when at least one chat provider could be connected from these settings (a key, an Ollama host, or
+    the Anthropic auth token the SDK reads on its own). Mirrors the auto-order check in chat/providers.py."""
+    keys = (
+        settings.anthropic_api_key,
+        settings.openai_api_key,
+        settings.gemini_api_key,
+        settings.groq_api_key,
+        settings.openrouter_api_key,
+        settings.ollama_host,
+    )
+    return any(keys) or bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+
+
+def production_warnings(settings: Settings) -> list[str]:
+    """Settings a production deployment should look at twice. The production validator logs them at start and
+    `bearcase doctor` reports them; none of them stops the API, because each can be a deliberate choice."""
+    warnings: list[str] = []
+    local = [o for o in settings.cors_origins if "localhost" in o or "127.0.0.1" in o]
+    if local:
+        warnings.append(
+            f"BEARCASE_CORS_ORIGINS still lists {', '.join(local)}; set it to the web app's public origin "
+            "(a JSON list, no trailing slash)"
+        )
+    if settings.is_sqlite:
+        warnings.append(
+            "BEARCASE_DATABASE_URL is SQLite: it serves one process, and most hosts replace the filesystem on every "
+            "deploy; use PostgreSQL (postgresql+psycopg://...)"
+        )
+    if settings.storage_backend == "local":
+        warnings.append(
+            "BEARCASE_STORAGE_BACKEND=local keeps uploads on this instance's disk; on an ephemeral filesystem they "
+            "are gone after the next deploy (use s3 or a persistent disk)"
+        )
+    if settings.chat_provider == "auto" and not has_chat_credentials(settings):
+        warnings.append(
+            "BEARCASE_CHAT_PROVIDER=auto found no provider key, so the chat answers from the rule-based composer; "
+            "add a key (GEMINI_API_KEY for the free tier) or set BEARCASE_CHAT_PROVIDER=mock to make that deliberate"
+        )
+    if not settings.rate_limit_enabled:
+        warnings.append("BEARCASE_RATE_LIMIT_ENABLED is off: upload, processing, and model-calling routes are unmetered")
+    if len(settings.secret_key) < 32:
+        warnings.append("BEARCASE_SECRET_KEY is shorter than 32 characters; use 32 or more")
+    return warnings
 
 
 @lru_cache

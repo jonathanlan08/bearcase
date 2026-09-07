@@ -1,21 +1,38 @@
-"""BearCase command line: serve, migrate, seed, worker, generate-fixtures, eval."""
+"""BearCase command line: serve, migrate, doctor, seed, worker, generate-fixtures, eval."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import logging
+import os
 import sys
 import time
+import uuid
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Literal
 
 API_ROOT = Path(__file__).resolve().parents[2]
 
 
-def cmd_migrate(_args: argparse.Namespace) -> int:
-    from bearcase.api.app import run_migrations
+def _alembic_config():  # type: ignore[no-untyped-def]
+    """Alembic configuration for a checkout (apps/api) or for an installed package started from a directory
+    that holds alembic.ini and alembic/ (the Docker image runs from /app, where both are copied)."""
+    from alembic.config import Config
 
-    run_migrations()
+    for root in (API_ROOT, Path.cwd()):
+        if (root / "alembic.ini").is_file() and (root / "alembic").is_dir():
+            cfg = Config(str(root / "alembic.ini"))
+            cfg.set_main_option("script_location", str(root / "alembic"))
+            return cfg
+    raise SystemExit(f"alembic.ini and alembic/ not found in {API_ROOT} or {Path.cwd()}; run from apps/api")
+
+
+def cmd_migrate(_args: argparse.Namespace) -> int:
+    from alembic import command
+
+    command.upgrade(_alembic_config(), "head")
     print("migrations applied")
     return 0
 
@@ -68,11 +85,220 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return 0 if report["passed"] else 1
 
 
+# ---- doctor -----------------------------------------------------------------------------------------------
+
+Status = Literal["ok", "warn", "fail"]
+
+
+@dataclass
+class DoctorRow:
+    name: str
+    status: Status
+    detail: str
+
+
+def _redact(text: str, secrets: list[str | None]) -> str:
+    """Replace every configured secret that might appear in a driver's error text."""
+    for secret in secrets:
+        if secret and len(secret) >= 4:
+            text = text.replace(secret, "***")
+    return text
+
+
+def _mb(n: int) -> str:
+    return f"{n / (1024 * 1024):g} MB"
+
+
+def doctor_rows() -> list[DoctorRow]:
+    """Readiness checks for the configured environment. No row ever contains a key: providers are named by
+    label and model id, and no check contacts a model provider (the chat backend is resolved from settings
+    alone). The database and storage checks do touch the database and write one probe object."""
+    from pydantic import ValidationError
+
+    from bearcase.config import Settings, get_settings
+
+    rows: list[DoctorRow] = []
+    try:
+        s = get_settings()
+    except ValidationError as exc:
+        problems = "; ".join(str(e.get("msg", "")).removeprefix("Value error, ") for e in exc.errors())
+        rows.append(DoctorRow("settings", "fail", problems))
+        return rows
+    secrets: list[str | None] = [
+        s.secret_key,
+        s.anthropic_api_key,
+        s.openai_api_key,
+        s.gemini_api_key,
+        s.groq_api_key,
+        s.openrouter_api_key,
+        s.chat_api_key,
+    ]
+
+    rows.append(DoctorRow("env", "ok", s.env))
+
+    # Database: reachable, and at the newest migration.
+    from sqlalchemy import text
+    from sqlalchemy.engine import make_url
+
+    from bearcase.db import get_engine, reset_engine
+
+    kind = "sqlite" if s.is_sqlite else "postgresql"
+    try:
+        url = make_url(s.database_url)
+        secrets.append(url.password)
+        where = url.render_as_string(hide_password=True)
+    except Exception:
+        where = kind
+    try:
+        from alembic.runtime.migration import MigrationContext
+        from alembic.script import ScriptDirectory
+
+        head = ScriptDirectory.from_config(_alembic_config()).get_current_head()
+        reset_engine()
+        with get_engine().connect() as conn:
+            conn.execute(text("SELECT 1"))
+            current = MigrationContext.configure(conn).get_current_revision()
+    except SystemExit as exc:
+        rows.append(DoctorRow("database", "fail", str(exc)))
+    except Exception as exc:
+        rows.append(DoctorRow("database", "fail", f"{kind} not reachable ({where}): {_redact(str(exc), secrets)}"))
+    else:
+        if current == head:
+            status: Status = "warn" if (s.is_sqlite and s.env == "production") else "ok"
+            note = "; SQLite in production serves one process and lives on this instance's disk" if status == "warn" else ""
+            rows.append(DoctorRow("database", status, f"{kind} reachable, migrated to {head}{note}"))
+        else:
+            hint = "run `bearcase migrate`" + (" (development mode also migrates on API start)" if s.env != "production" else "")
+            rows.append(
+                DoctorRow("database", "fail", f"{kind} reachable but at revision {current or 'none'}, head is {head}; {hint}")
+            )
+
+    # Storage: one probe object written, read back, and deleted.
+    from bearcase.ingest.storage import get_storage
+
+    place = f"local {s.storage_local_dir}" if s.storage_backend == "local" else f"s3 bucket {s.s3_bucket or '(unset)'}"
+    try:
+        storage = get_storage()
+        key = f"doctor/{uuid.uuid4().hex}.txt"
+        payload = b"bearcase doctor probe"
+        storage.put(key, payload)
+        readable = storage.exists(key) and storage.get(key) == payload
+        storage.delete(key)
+    except Exception as exc:
+        rows.append(DoctorRow("storage", "fail", f"{place}: {_redact(str(exc), secrets)}"))
+    else:
+        if not readable:
+            rows.append(DoctorRow("storage", "fail", f"{place}: the probe object could not be read back"))
+        elif s.storage_backend == "local" and s.env == "production":
+            rows.append(
+                DoctorRow("storage", "warn", f"{place}, writable; on an ephemeral filesystem uploads vanish at the next deploy")
+            )
+        else:
+            rows.append(DoctorRow("storage", "ok", f"{place}, writable"))
+
+    # Secret key: never printed, only whether it is the checked-in default and how long it is.
+    if s.secret_key == Settings.model_fields["secret_key"].default:
+        rows.append(DoctorRow("secret key", "warn", "development default; fine locally, refused when BEARCASE_ENV=production"))
+    elif len(s.secret_key) < 32:
+        rows.append(DoctorRow("secret key", "warn", f"set, {len(s.secret_key)} characters; use 32 or more"))
+    else:
+        rows.append(DoctorRow("secret key", "ok", f"set, {len(s.secret_key)} characters"))
+
+    # Chat: which backend answers, by label and model id only.
+    from bearcase.chat.providers import MOCK_LABEL, resolve_chat_backend
+
+    backend = resolve_chat_backend(s)
+    if backend.kind == "mock":
+        if s.chat_provider == "mock":
+            rows.append(DoctorRow("chat", "ok", f"{backend.label} ({backend.model}); no live model by choice"))
+        else:
+            rows.append(DoctorRow("chat", "warn", f"{backend.label} ({backend.model}); no provider key found, so no live model"))
+    elif not backend.ready:
+        rows.append(DoctorRow("chat", "warn", f"{backend.label} is not ready ({backend.reason}); {MOCK_LABEL} answers instead"))
+    else:
+        detail = f"{backend.label} · {backend.model}"
+        if backend.free_tier and backend.name != "ollama":
+            detail += "; free tier: every user of this deployment shares one project's quota"
+        rows.append(DoctorRow("chat", "ok", detail))
+
+    # Extraction and reports.
+    if s.ai_provider == "anthropic":
+        has_key = bool(s.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+        if has_key:
+            rows.append(DoctorRow("extraction", "ok", f"Anthropic Claude · {s.ai_model}"))
+        else:
+            rows.append(
+                DoctorRow(
+                    "extraction", "fail", f"Anthropic Claude · {s.ai_model}, but no ANTHROPIC_API_KEY; processing would fail"
+                )
+            )
+    else:
+        rows.append(DoctorRow("extraction", "ok", "Rule-based mock (rules-v1); no key needed"))
+
+    # Abuse limits and quotas.
+    if s.rate_limit_enabled:
+        detail = f"on, {s.rate_limit_per_minute}/min per user (per client address before sign-in); in-process, so one API instance is assumed"
+        if s.trust_proxy_headers:
+            detail += "; X-Forwarded-For trusted"
+        rows.append(DoctorRow("rate limits", "ok", detail))
+    else:
+        rows.append(DoctorRow("rate limits", "ok" if s.env == "test" else "warn", "off; model-calling routes are unmetered"))
+    rows.append(
+        DoctorRow(
+            "quotas",
+            "ok",
+            f"{_mb(s.max_upload_bytes)} per upload, {s.max_documents_per_deal} documents per deal, "
+            f"{_mb(s.max_storage_bytes_per_user)} per user, demo data kept {s.demo_retention_days} days",
+        )
+    )
+
+    # CORS: the browser's Origin never carries a trailing slash, and localhost is only right in development.
+    origins = ", ".join(s.cors_origins) or "(none)"
+    if any(o.endswith("/") for o in s.cors_origins):
+        rows.append(DoctorRow("cors", "warn", f"{origins}; an origin with a trailing slash never matches"))
+    elif s.env == "production" and any("localhost" in o or "127.0.0.1" in o for o in s.cors_origins):
+        rows.append(DoctorRow("cors", "warn", f"{origins}; still a localhost origin in production"))
+    else:
+        rows.append(DoctorRow("cors", "ok", origins))
+
+    # Jobs.
+    runners = {
+        "thread": "in-process, one worker thread",
+        "sync": "inline, blocks the request (tests and seeding)",
+        "poll": "queued for `bearcase worker`; make sure one is running",
+    }
+    job_status: Status = "warn" if (s.job_runner == "sync" and s.env != "test") else "ok"
+    rows.append(DoctorRow("job runner", job_status, f"{s.job_runner}: {runners[s.job_runner]}"))
+    return rows
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    from bearcase import __version__
+
+    logging.getLogger("alembic").setLevel(logging.WARNING)  # plugin setup chatter would precede the table
+    rows = doctor_rows()
+    failures = sum(r.status == "fail" for r in rows)
+    warnings = sum(r.status == "warn" for r in rows)
+    if args.json:
+        print(json.dumps({"version": __version__, "ready": failures == 0, "rows": [asdict(r) for r in rows]}, indent=2))
+        return 1 if failures else 0
+    print(f"BearCase doctor (bearcase {__version__})")
+    width = max(len(r.name) for r in rows)
+    for r in rows:
+        print(f"  [{r.status:<4}] {r.name:<{width}}  {r.detail}")
+    verdict = "Not ready: fix the failures above." if failures else "Ready."
+    print(f"{failures} failure{'s' if failures != 1 else ''}, {warnings} warning{'s' if warnings != 1 else ''}. {verdict}")
+    return 1 if failures else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(prog="bearcase", description="BearCase AI API tooling")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("migrate", help="Apply database migrations").set_defaults(fn=cmd_migrate)
+    d = sub.add_parser("doctor", help="Check the configured environment and print a readiness table (exit 1 on a failure)")
+    d.add_argument("--json", action="store_true")
+    d.set_defaults(fn=cmd_doctor)
     s = sub.add_parser("serve", help="Run the API server")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8000)

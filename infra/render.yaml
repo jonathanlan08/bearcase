@@ -1,0 +1,78 @@
+# Render Blueprint for the BearCase API: one Docker web service plus a managed PostgreSQL database.
+#
+# Use: push the repository to GitHub, then Render dashboard -> New -> Blueprint -> pick the repository.
+# Render reads render.yaml from the repository root by default; give it this path (infra/render.yaml) when
+# the dashboard asks, or copy the file to the root. The dashboard then prompts for the one value that is
+# not synced (GEMINI_API_KEY). The web app is deployed separately on Vercel with BEARCASE_API_URL pointing
+# at this service; the walk-through is docs/deployment.md.
+#
+# One API instance is assumed. The rate limiter (apps/api/src/bearcase/api/ratelimit.py) keeps its token
+# buckets in process memory, so a second instance would enforce a separate budget of its own; scale the
+# instance size, not the instance count, until a shared limiter exists.
+#
+# Names and ports match infra/docker-compose.yml and infra/api.Dockerfile (database "bearcase", API on 8000).
+
+databases:
+  - name: bearcase-db
+    plan: free # free databases expire 30 days after creation and hold 1 GB; pick basic-256mb for anything that must last
+    region: oregon
+    databaseName: bearcase
+    user: bearcase
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: bearcase-api
+    runtime: docker
+    plan: free # spins down after 15 idle minutes; the first request afterwards waits about a minute
+    region: oregon
+    dockerfilePath: ./infra/api.Dockerfile
+    dockerContext: .
+    # Production mode does not migrate on start (apps/api/src/bearcase/api/app.py), so migrate first, then let
+    # `bearcase doctor` refuse to serve when a check fails (database, storage, the secret, a missing extraction key).
+    dockerCommand: sh -c "bearcase migrate && bearcase doctor && bearcase serve --host 0.0.0.0 --port 8000"
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: BEARCASE_ENV
+        value: production
+      - key: BEARCASE_SECRET_KEY
+        generateValue: true # a random value per environment; never committed
+      - key: BEARCASE_DATABASE_URL
+        fromDatabase:
+          name: bearcase-db
+          property: connectionString # postgres(ql):// URLs are normalised to postgresql+psycopg:// in config.py
+      - key: BEARCASE_CHAT_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false # pasted in the dashboard at first deploy; every visitor's chat runs on this one project's quota
+      - key: BEARCASE_CORS_ORIGINS
+        value: '["https://your-project.vercel.app"]' # JSON list, the web app's origin, no trailing slash
+      - key: BEARCASE_JOB_RUNNER
+        value: thread # jobs run on a worker thread inside the API process; no separate worker service
+      - key: BEARCASE_AI_PROVIDER
+        value: mock # extraction stays rule-based; set anthropic plus ANTHROPIC_API_KEY (sync: false) for Claude
+      - key: BEARCASE_TRUST_PROXY_HEADERS
+        value: "true" # Render's proxy appends the client address to X-Forwarded-For; the limiter reads the last hop
+      # Uploads. The local backend writes to this instance's disk, which Render replaces on every deploy: the
+      # demo keeps working (each visitor gets a freshly seeded deal), but a document uploaded before a deploy
+      # can no longer be reprocessed afterwards. For real uploads use S3-compatible storage ...
+      # - key: BEARCASE_STORAGE_BACKEND
+      #   value: s3
+      # - key: BEARCASE_S3_BUCKET
+      #   value: bearcase
+      # - key: BEARCASE_S3_REGION
+      #   value: us-east-1
+      # - key: AWS_ACCESS_KEY_ID
+      #   sync: false
+      # - key: AWS_SECRET_ACCESS_KEY
+      #   sync: false
+      # ... or a persistent disk (paid instance types; a disk pins the service to one instance, which the
+      # in-memory limiter needs anyway) together with BEARCASE_STORAGE_LOCAL_DIR=/var/lib/bearcase/storage:
+      # - key: BEARCASE_STORAGE_LOCAL_DIR
+      #   value: /var/lib/bearcase/storage
+    # disk:
+    #   name: bearcase-storage
+    #   mountPath: /var/lib/bearcase
+    #   sizeGB: 1

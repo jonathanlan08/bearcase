@@ -9,6 +9,7 @@ from sqlalchemy import select
 from bearcase.api.deps import DbDep, DealDep, UserDep
 from bearcase.api.schemas import AdjustmentDecisionRequest, AdjustmentOut, FinancialsOut, MetricOut, PeriodOut, WaterfallStep
 from bearcase.audit import record
+from bearcase.chat.brief import invalidate_brief
 from bearcase.engine import formulas as f
 from bearcase.models import Adjustment, FinancialMetric, FinancialPeriod
 from bearcase.models.enums import AdjustmentDecision, AdjustmentDirection, MetricSource
@@ -152,4 +153,5 @@ def decide_adjustment(
         payload={"previous": previous, "decision": body.decision, "rationale": body.rationale},
     )
     db.commit()
+    invalidate_brief(deal.id)
     return get_financials(deal, db)
