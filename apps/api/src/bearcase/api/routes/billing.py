@@ -28,6 +28,7 @@ log = logging.getLogger("bearcase.billing")
 router = APIRouter(prefix="/billing", tags=["billing"])
 PILOT_DESCRIPTION = "BearCase pilot: one deal checked end to end with support, for a bounded period."
 SIGNATURE_HEADER = "stripe-signature"
+SAAS_TAX_CODE = "txcd_10103001"  # Software as a service, business use
 
 
 @dataclass
@@ -80,7 +81,12 @@ class StripeSdkGateway:
                     "price_data": {
                         "currency": currency,
                         "unit_amount": amount_cents,
-                        "product_data": {"name": "BearCase pilot", "description": description},
+                        "product_data": {
+                            "name": "BearCase pilot",
+                            "description": description,
+                            # Required when the Stripe account uses Managed Payments; harmless otherwise.
+                            "tax_code": SAAS_TAX_CODE,
+                        },
                     },
                 }
             ],
