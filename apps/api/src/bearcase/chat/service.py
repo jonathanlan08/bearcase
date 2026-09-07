@@ -199,10 +199,20 @@ def _split_code(text: str) -> list[tuple[bool, str]]:
     return out
 
 
+_GROUPED_CITE = re.compile(r"\[(E|M):([0-9a-fA-F-]{8,36}(?:\s*,\s*[0-9a-fA-F-]{8,36})+)\]")
+
+
+def normalize_markers(text: str) -> str:
+    """Accept the marker forms models actually write: fullwidth brackets, and several ids in one marker."""
+    text = text.replace("\u3010", "[").replace("\u3011", "]")
+    return _GROUPED_CITE.sub(lambda m: "".join(f"[{m.group(1)}:{i.strip()}]" for i in m.group(2).split(",")), text)
+
+
 def resolve_citations(db: Session, deal: Deal, text: str) -> tuple[str, dict[str, Any], bool]:
     """Keep markers that resolve, drop the rest; return cleaned text, citation payload, grounded flag.
     Code regions (fenced blocks and backtick spans) are verbatim: a marker inside one is neither resolved,
     rewritten, nor counted, and a number inside one is not a figure."""
+    text = normalize_markers(text)
     ev_ids = {str(e) for e in db.scalars(select(Evidence.id).where(Evidence.deal_id == deal.id))}
     me_ids = {str(m) for m in db.scalars(select(FinancialMetric.id).where(FinancialMetric.deal_id == deal.id))}
     used_e: list[str] = []
