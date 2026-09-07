@@ -160,7 +160,8 @@ def describe_error(exc: BaseException, backend: ChatBackend) -> str:
     if status in (401, 403) or "api key" in low or "authentication" in low or "unauthorized" in low:
         msg = f"{backend.label} rejected the API key. Check {env} in .env and restart the API."
     elif status == 429 or "rate limit" in low or "quota" in low:
-        msg = f"{backend.label} rate limit or quota reached. Wait a minute and try again; free tiers are limited."
+        detail = re.sub(r"\s+", " ", str(getattr(exc, "message", "") or exc))[:160]
+        msg = f"{backend.label} rate limit or quota reached. Wait a minute and try again; free tiers are limited. ({detail})"
     elif status in (500, 502, 503, 504) or "high demand" in low or "unavailable" in low or "overloaded" in low:
         msg = f"{backend.label} is temporarily unavailable (the provider reported high demand). Try again in a moment."
     elif status == 404 and "model" in low:

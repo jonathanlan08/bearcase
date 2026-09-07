@@ -294,3 +294,18 @@ def cached_brief(deal_id: uuid.UUID) -> str | None:
     """The cached text, if any (tests and diagnostics)."""
     entry = _CACHE.get(deal_id)
     return entry.text if entry else None
+
+
+def compact_brief(text: str, max_chars: int = 5500) -> str:
+    """A shorter brief for providers that meter tokens per minute tightly: the statement table goes (the
+    metrics section already carries the headline figures), the rest is kept in order and cut at a line."""
+    sections: list[list[str]] = [[]]
+    for line in text.split("\n"):
+        if line and not line.startswith(" ") and line.endswith(":") and sections[-1]:
+            sections.append([])
+        sections[-1].append(line)
+    kept = [sec for sec in sections if not (sec and sec[0].startswith("Statement"))]
+    out = "\n".join("\n".join(sec) for sec in kept)
+    if len(out) > max_chars:
+        out = out[:max_chars].rsplit("\n", 1)[0] + "\n(brief shortened for this provider; open the app for the rest)"
+    return out

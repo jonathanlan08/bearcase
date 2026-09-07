@@ -22,7 +22,7 @@ from typing import Any, cast
 import openai
 from sqlalchemy.orm import Session
 
-from bearcase.chat.brief import build_brief
+from bearcase.chat.brief import build_brief, compact_brief
 from bearcase.chat.providers import ChatBackend
 from bearcase.chat.service import (
     CHAT_MAX_RETRIES,
@@ -56,6 +56,16 @@ def _stream_extra(backend: ChatBackend) -> dict[str, Any]:
     return {"stream_options": {"include_usage": True}} if backend.name in USAGE_PROVIDERS else {}
 
 
+# Providers whose free tier meters tokens per minute tightly get a shorter brief and a smaller output cap.
+SMALL_CONTEXT_PROVIDERS = frozenset({"groq"})
+SMALL_BRIEF_CHARS = 3500
+SMALL_OUTPUT_TOKENS = 1024
+SMALL_CONTEXT_NOTE = (
+    "\n\nTools are not available on this provider. Answer from the deal brief only; when the brief lacks a detail, "
+    "say so and name the page in the app where it lives."
+)
+
+
 def request_params(backend: ChatBackend, settings: Settings | None = None) -> dict[str, Any]:
     """Per-request knobs from settings: the output cap (max_completion_tokens for OpenAI, which deprecated
     max_tokens; max_tokens everywhere else) and, for providers that accept it, the reasoning effort."""
@@ -64,7 +74,11 @@ def request_params(backend: ChatBackend, settings: Settings | None = None) -> di
     if backend.name == "openai":
         params["max_completion_tokens"] = s.chat_max_output_tokens
     else:
-        params["max_tokens"] = s.chat_max_output_tokens
+        params["max_tokens"] = (
+            min(s.chat_max_output_tokens, SMALL_OUTPUT_TOKENS)
+            if backend.name in SMALL_CONTEXT_PROVIDERS
+            else s.chat_max_output_tokens
+        )
     if backend.name in REASONING_PROVIDERS:
         params["reasoning_effort"] = s.chat_reasoning_effort
     return params
@@ -230,9 +244,13 @@ def openai_compat_loop(
     usage: dict[str, Any],
 ) -> Iterator[str]:
     client = make_client(backend)
-    system = system_prompt(deal, build_brief(db, deal))
+    # Groq's free tier meters about 8K tokens a minute per model, so it gets a shorter brief and no tools: a
+    # second request carrying a tool result would blow the budget on its own.
+    small = backend.name in SMALL_CONTEXT_PROVIDERS
+    brief = compact_brief(build_brief(db, deal)) if small else build_brief(db, deal)
+    system = system_prompt(deal, brief) + (SMALL_CONTEXT_NOTE if small else "")
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}, *history]
-    tools = openai_tools()
+    tools = None if small else openai_tools()
     extra = _stream_extra(backend)
     params = request_params(backend)
     chain = models_to_try(backend)
@@ -244,7 +262,12 @@ def openai_compat_loop(
         state: dict[str, Any] = {}
         try:
             stream = client.chat.completions.create(
-                model=model, messages=cast(Any, messages), tools=cast(Any, tools), stream=True, **params, **extra
+                model=model,
+                messages=cast(Any, messages),
+                stream=True,
+                **params,
+                **extra,
+                **({} if tools is None else {"tools": cast(Any, tools)}),
             )
             yield from _read_stream(stream, text_parts, round_text, pending, state)
         except _TOOL_REJECTION_ERRORS as exc:

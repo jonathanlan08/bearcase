@@ -1334,3 +1334,8 @@ def test_timeouts_and_connection_failures_hand_over_and_read_plainly() -> None:
     assert chat_service.busy_error(openai.APIConnectionError(request=req)) is True
     text = chat_service.describe_error(openai.APITimeoutError(request=req), GEMINI)
     assert "did not answer within" in text and "seconds" in text
+
+
+def test_marker_variants_are_normalised() -> None:
+    out = chat_service.normalize_markers("Fact 【M:030ddf3e】【E:1959b37a,423c374f】.")
+    assert out == "Fact [M:030ddf3e][E:1959b37a][E:423c374f]."

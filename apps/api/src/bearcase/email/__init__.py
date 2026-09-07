@@ -63,7 +63,7 @@ class ResendEmailer:
         )
         if response.status_code >= 400:
             # The body may echo the request; the key never appears in it, but keep the log short anyway.
-            raise EmailDeliveryError(f"Resend answered {response.status_code} for a message to {to}")
+            raise EmailDeliveryError(f"Resend answered {response.status_code} for a message to {to}: {response.text[:300]}")
 
 
 class EmailDeliveryError(RuntimeError):

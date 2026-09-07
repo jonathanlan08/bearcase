@@ -8,6 +8,7 @@ token from an unauthenticated caller is rate limited by client address, like sig
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 from datetime import UTC, timedelta
 from typing import Any
@@ -22,11 +23,12 @@ from bearcase.api.schemas import LoginRequest, RegisterRequest, RequestResetRequ
 from bearcase.audit import record
 from bearcase.auth import SESSION_COOKIE, create_session, hash_password, revoke_session, verify_password
 from bearcase.config import get_settings
-from bearcase.email import get_emailer
+from bearcase.email import EmailDeliveryError, get_emailer
 from bearcase.models import AuthToken, User, UserSession
 from bearcase.models.base import utcnow
 from bearcase.models.enums import TokenPurpose
 
+log = logging.getLogger("bearcase.auth")
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 TOKEN_TTL: dict[TokenPurpose, timedelta] = {
@@ -117,7 +119,10 @@ def send_verification_email(db: Session, user: User) -> None:
         f"<p>Hi {user.display_name},</p><p>Confirm the email address for your BearCase account by opening this link "
         f'within 24 hours:</p><p><a href="{link}">{link}</a></p><p>If you did not create an account, ignore this message.</p>'
     )
-    get_emailer().send(user.email, "Confirm your BearCase email", text, html)
+    try:
+        get_emailer().send(user.email, "Confirm your BearCase email", text, html)
+    except EmailDeliveryError:
+        log.warning("could not send the verification email to %s", user.email, exc_info=True)
 
 
 def send_reset_email(db: Session, user: User) -> None:
@@ -132,7 +137,10 @@ def send_reset_email(db: Session, user: User) -> None:
         f'link within one hour to choose a new password:</p><p><a href="{link}">{link}</a></p>'
         "<p>If that was not you, ignore this message; your password stays as it is.</p>"
     )
-    get_emailer().send(user.email, "Reset your BearCase password", text, html)
+    try:
+        get_emailer().send(user.email, "Reset your BearCase password", text, html)
+    except EmailDeliveryError:
+        log.warning("could not send the reset email to %s", user.email, exc_info=True)
 
 
 # ---- routes -----------------------------------------------------------------------------------------------
