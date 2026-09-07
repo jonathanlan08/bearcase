@@ -1173,9 +1173,9 @@ def test_request_params_per_provider() -> None:
 def test_chat_client_fails_fast() -> None:
     c = openai_compat.make_client(GEMINI)
     assert c.timeout == 30.0 and c.max_retries == 0 and str(c.base_url).startswith("https://generativelanguage")
-    assert chat_service.CHAT_TIMEOUT_SECONDS == 45.0 and chat_service.CHAT_MAX_RETRIES == 1
+    assert chat_service.CHAT_TIMEOUT_SECONDS == 30.0 and chat_service.CHAT_MAX_RETRIES == 0
     proxied = openai_compat.make_client(resolve_chat_backend(settings(openrouter_api_key=FAKE_KEY)))
-    assert proxied.max_retries == 1 and proxied.default_headers.get("X-Title") == "BearCase"
+    assert proxied.max_retries == 0 and proxied.default_headers.get("X-Title") == "BearCase"
 
 
 def test_fallback_chain_per_provider() -> None:
