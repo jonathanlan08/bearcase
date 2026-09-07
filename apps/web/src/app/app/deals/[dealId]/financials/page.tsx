@@ -4,8 +4,8 @@ import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MessageSquareText } from "lucide-react";
-import { api, type Adjustment, type Financials, type Metric } from "@/lib/api";
-import { useFinancials, qk } from "@/components/app/hooks";
+import { api, type Adjustment, type Financials, type Metric, type StatementMapping } from "@/lib/api";
+import { useFinancials, useStatementMapping, qk } from "@/components/app/hooks";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, Panel, Skeleton } from "@/components/ui/primitives";
@@ -59,6 +59,7 @@ export default function FinancialsPage() {
         <p className="mt-2 max-w-3xl text-sm text-fg-muted">The seller’s adjusted EBITDA, rebuilt from the statements one adjustment at a time. Every number links to the cell or sentence it came from.</p>
       </PageHeader>
       <div className="flex flex-col gap-6 p-4 md:p-6">
+        <CheckWhatWeRead dealId={dealId} onCite={open} />
         <WhatChanged f={f} dealId={dealId} onOpen={setViewer} onDecide={setDecide} />
         <Panel title="Add-back bridge: from the seller's number to the verified number" id="bridge">
           <AddbackWaterfall steps={f.waterfall} sellerTotal={latest(f, "ebitda_adjusted_seller")?.value} />
@@ -69,7 +70,7 @@ export default function FinancialsPage() {
                 <tr key={a.id}>
                   <td className={td}><p className="font-medium">{a.label}</p>{a.seller_rationale && <p className="mt-0.5 text-xs text-fg-muted">Seller: {a.seller_rationale}</p>}</td>
                   <td className={`${td} num text-right`}>{fmtMoney(a.amount)}</td>
-                  <td className={td}><StatusChip status={a.decision} />{a.decided_by_user_id && <p className="mt-1 text-[11px] font-medium text-accent">reviewer decision</p>}</td>
+                  <td className={td}><StatusChip status={a.decision} /><p className={`mt-1 text-[11px] font-medium ${a.decided_by_user_id ? "text-accent" : "text-fg-muted"}`}>{a.decided_by_user_id ? "Reviewer decision" : "Rule-based, provisional"}</p></td>
                   <td className={`${td} text-xs`}>{a.decision_rationale}<p className="mt-1 font-mono text-[10px] text-fg-muted">rule: {a.decision_rule}</p></td>
                   <td className={td}><span className="inline-flex flex-wrap gap-1">{a.evidence_ids.slice(0, 4).map((e) => <EvidenceCite key={e} dealId={dealId} id={e} onOpen={setViewer} />)}</span></td>
                   <td className={`${td} whitespace-nowrap`}><Button size="sm" variant="ghost" onClick={() => setDecide(a.id)}>Decide…</Button><Button size="sm" variant="ghost" icon={<MessageSquareText size={14} />} onClick={() => askTheDeal(askAboutAdjustment(a))}>Ask</Button></td>
@@ -95,6 +96,71 @@ export default function FinancialsPage() {
       <DocumentViewer dealId={dealId} target={viewer} onClose={() => setViewer(null)} />
       <DecisionDialog dealId={dealId} adjustmentId={decide} onClose={() => setDecide(null)} f={f} />
     </div>
+  );
+}
+
+const LINE_LABEL = new Map(LINES.map(([k, l]) => [k, l]));
+const SCALE_LABEL: Record<number, string> = { 1: "dollars (no scale stated)", 1000: "thousands (×1,000 applied)", 1000000: "millions (×1,000,000 applied)" };
+
+/** "Check what we read": the interpretation behind every number on this page, before any of it is trusted. Detected
+ *  periods, scale, and the row each line came from, with the cells to open; lines the rules were unsure about are
+ *  flagged; rows nothing matched are listed so the reader can see what was not read. */
+function CheckWhatWeRead({ dealId, onCite }: { dealId: string; onCite: (eid: string) => void }) {
+  const q = useStatementMapping(dealId);
+  const [showAll, setShowAll] = useState(false);
+  if (q.isPending) return <Panel title="Check what we read" id="check-read"><Skeleton className="h-24" /></Panel>;
+  if (q.isError || !q.data) return null;
+  const m: StatementMapping = q.data;
+  const cov = m.coverage;
+  const flagged = m.statements.flatMap((s) => (s.lines ?? []).filter((l) => l.needs_review).map((l) => ({ ...l, sheet: s.sheet })));
+  const unread = cov.documents_failed + cov.documents_pending + cov.statements_unmapped + cov.unmapped_rows + cov.ambiguous_lines + cov.metrics_requiring_review;
+  return (
+    <Panel title="Check what we read" id="check-read">
+      <p className="text-sm text-fg-muted">Every figure below was read from a spreadsheet by rules, not by a person. Before relying on it, confirm the years, the scale, and the rows the rules picked. Anything the rules were unsure about is flagged; anything they could not read is listed.</p>
+      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        <div className="flex flex-col gap-4">
+          {m.statements.map((s) => s.mapped ? (
+            <dl key={s.document_id} className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm md:grid-cols-4">
+              <div className="col-span-2 md:col-span-4"><dt className="text-xs text-fg-muted">Statement</dt><dd className="font-medium">{s.document_name} <span className="font-mono text-[11px] text-fg-muted">sheet {s.sheet}, header row {s.header_row}</span></dd></div>
+              <div><dt className="text-xs text-fg-muted">Years found</dt><dd className="num">{(s.periods ?? []).map((p) => p.label).join(", ")}</dd></div>
+              <div><dt className="text-xs text-fg-muted">Scale</dt><dd>{SCALE_LABEL[s.scale ?? 1] ?? `×${s.scale}`}</dd></div>
+              <div><dt className="text-xs text-fg-muted">Currency</dt><dd>{s.currency}</dd></div>
+              <div><dt className="text-xs text-fg-muted">Lines read</dt><dd className="num">{(s.lines ?? []).length} of {LINES.length}</dd></div>
+              {(s.unmapped_rows ?? []).length > 0 && (
+                <div className="col-span-2 md:col-span-4">
+                  <dt className="text-xs text-fg-muted">Rows nothing matched ({s.unmapped_rows!.length})</dt>
+                  <dd className="mt-1 flex flex-wrap gap-1">{(showAll ? s.unmapped_rows! : s.unmapped_rows!.slice(0, 8)).map((r) => <span key={r.row} className="rounded-[var(--radius-1)] border border-hairline px-1.5 py-0.5 font-mono text-[11px] text-fg-muted">row {r.row}: {r.label || "(blank)"}</span>)}{s.unmapped_rows!.length > 8 && <button type="button" className="text-xs text-accent hover:underline" onClick={() => setShowAll((v) => !v)}>{showAll ? "show fewer" : `and ${s.unmapped_rows!.length - 8} more`}</button>}</dd>
+                </div>
+              )}
+            </dl>
+          ) : (
+            <p key={s.document_id} className="text-sm"><StatusGlyph status="review_required" size={12} className="mr-1 inline align-middle" /><span className="font-medium">{s.document_name}</span> was not read as a statement. {s.reason}</p>
+          ))}
+          {flagged.length > 0 ? (
+            <div>
+              <p className="text-sm font-medium"><StatusGlyph status="review_required" size={12} className="mr-1 inline align-middle" />{flagged.length} {flagged.length === 1 ? "line needs" : "lines need"} a person to confirm</p>
+              <ul className="mt-1 space-y-1 text-sm text-fg-muted">
+                {flagged.map((l) => <li key={l.key}>{LINE_LABEL.get(l.key) ?? l.key}{l.components ? `: summed from ${l.components.join(" + ")} because no total row exists` : ": matched by prefix only"}{Object.values(l.cells)[0]?.evidence_id && <button type="button" className="ml-2 text-xs text-accent hover:underline" onClick={() => onCite(Object.values(l.cells)[0]!.evidence_id!)}>open the rows</button>}</li>)}
+              </ul>
+            </div>
+          ) : <p className="text-sm text-fg-muted"><StatusGlyph status="supported" size={12} className="mr-1 inline align-middle" />Every line matched a row exactly; nothing was summed or guessed.</p>}
+        </div>
+        <div className="rounded-[var(--radius-2)] border border-hairline bg-bg-raised p-4">
+          <p className="text-xs text-fg-muted">What was not checked</p>
+          <dl className="mt-2 grid grid-cols-2 gap-y-1.5 text-sm">
+            <dt className="text-fg-muted">Documents read</dt><dd className="num text-right">{cov.documents_ready}</dd>
+            <dt className="text-fg-muted">Documents failed or pending</dt><dd className="num text-right">{cov.documents_failed + cov.documents_pending}</dd>
+            <dt className="text-fg-muted">Statements not mapped</dt><dd className="num text-right">{cov.statements_unmapped}</dd>
+            <dt className="text-fg-muted">Rows nothing matched</dt><dd className="num text-right">{cov.unmapped_rows}</dd>
+            <dt className="text-fg-muted">Lines summed from parts</dt><dd className="num text-right">{cov.ambiguous_lines}</dd>
+            <dt className="text-fg-muted">Figures marked for review</dt><dd className="num text-right">{cov.metrics_requiring_review}</dd>
+            <dt className="text-fg-muted">Claims still to review</dt><dd className="num text-right">{(cov.claims_by_status.review_required ?? 0) + (cov.claims_by_status.pending ?? 0)}</dd>
+            <dt className="text-fg-muted">Claims with no evidence</dt><dd className="num text-right">{cov.claims_by_status.unsupported ?? 0}</dd>
+          </dl>
+          <p className="mt-3 text-xs text-fg-muted">{unread === 0 ? "Nothing is outstanding on the statements. The claims list and the report still need a person." : "Each count above is something a report reader would otherwise not know was left unread."}</p>
+        </div>
+      </div>
+    </Panel>
   );
 }
 
@@ -138,7 +204,7 @@ function WhatChanged({ f, dealId, onOpen, onDecide }: { f: Financials; dealId: s
             <ol className="flex flex-col gap-2" aria-label="Excluded adjustments and reasons">
               {excluded.map((a) => (
                 <li key={a.id} className="rounded-[var(--radius-2)] border border-hairline p-3 text-sm">
-                  <div className="flex flex-wrap items-center gap-2"><StatusGlyph status={a.decision} /><span className="font-medium">{a.label}</span><span className="num text-fg-muted">{fmtMoney(a.amount)}</span><span className="ml-auto text-xs text-fg-muted">{STATUS_LABEL[a.decision] ?? titleCase(a.decision)}{a.decided_by_user_id ? " · reviewer" : ""}</span></div>
+                  <div className="flex flex-wrap items-center gap-2"><StatusGlyph status={a.decision} /><span className="font-medium">{a.label}</span><span className="num text-fg-muted">{fmtMoney(a.amount)}</span><span className="ml-auto text-xs text-fg-muted">{STATUS_LABEL[a.decision] ?? titleCase(a.decision)}{a.decided_by_user_id ? " · reviewer decision" : " · rule-based, provisional"}</span></div>
                   {a.decision_rationale && <p className="mt-1 text-fg-muted">{a.decision_rationale}</p>}
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     {a.evidence_ids.slice(0, 3).map((e) => <EvidenceCite key={e} dealId={dealId} id={e} onOpen={onOpen} />)}

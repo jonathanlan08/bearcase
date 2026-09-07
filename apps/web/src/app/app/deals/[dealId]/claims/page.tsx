@@ -156,6 +156,9 @@ export default function ClaimsPage() {
                   <Button size="sm" variant="ghost" icon={<ExternalLink size={14} />} onClick={() => jumpToSource(d)} disabled={!d.source_evidence}>Jump to source</Button>
                   <Button size="sm" variant="ghost" icon={<MessageSquareText size={14} />} onClick={() => askTheDeal(askPrompt(d))}>Ask about this claim</Button>
                 </div>
+                <div className="mt-2 flex flex-wrap gap-2" aria-label="Questions about this claim">
+                  {CONTEXT_PROMPTS.map(([label, build]) => <Button key={label} size="sm" variant="secondary" onClick={() => askTheDeal(build(d), { send: true })}>{label}</Button>)}
+                </div>
                 {d.decisions.length > 0 && (
                   <ol className="mt-3 flex flex-col gap-1.5 border-t border-hairline pt-3 text-sm" aria-label="Decision history">
                     {d.decisions.map((x) => <li key={x.id} className={x.is_current ? "" : "text-fg-muted line-through"}><span className="font-medium">{x.user_name}</span> {ACTION_VERB[x.action] ?? x.action}{x.resulting_status ? ` → ${STATUS_LABEL[x.resulting_status] ?? x.resulting_status}` : ""}{x.corrected_value ? ` · ${fmtValue(x.corrected_value, x.corrected_unit)}` : ""}{x.note ? ` — ${x.note}` : ""} <span className="num text-xs text-fg-muted">{fmtDateTime(x.created_at)}</span></li>)}
@@ -175,6 +178,13 @@ export default function ClaimsPage() {
 }
 
 /** The prompt handed to "Ask the deal": the claim text, its status, and both numbers, so the user never retypes context. */
+/** One-click questions that carry the selected claim into the assistant, so the reader never retypes what is on screen. */
+const CONTEXT_PROMPTS: Array<[string, (d: ClaimDetail) => string]> = [
+  ["Explain this discrepancy", (d) => `In plain English, for a first-time buyer: what is the discrepancy in this claim and why does it matter?\nClaim: "${d.claim_text}"\nStatus: ${STATUS_LABEL[d.effective_status]}.${d.claimed_value !== null ? ` Seller says ${fmtValue(d.claimed_value, d.claimed_unit)}${d.verified_value !== null ? `; the documents show ${fmtValue(d.verified_value, d.verified_unit ?? d.claimed_unit)}` : ""}.` : ""} Cite the evidence.`],
+  ["Show the calculation", (d) => `Show how the checked figure for this claim was calculated: the formula, each input, and the cell or line each input came from. Do not recompute anything; describe the stored calculation.\nClaim: "${d.claim_text}"`],
+  ["What would resolve this?", (d) => `What document or figure from the seller would settle this claim one way or the other, and how should I word the request?\nClaim: "${d.claim_text}"\nStatus: ${STATUS_LABEL[d.effective_status]}.`],
+];
+
 function askPrompt(d: ClaimDetail): string {
   const numbers = d.claimed_value !== null ? ` Seller says ${fmtValue(d.claimed_value, d.claimed_unit)}${d.verified_value !== null ? `; the documents show ${fmtValue(d.verified_value, d.verified_unit ?? d.claimed_unit)}` : ""}.` : "";
   return `Explain this claim and the evidence behind it, then suggest what I should ask the seller.\nClaim: "${d.claim_text}"\nStatus: ${STATUS_LABEL[d.effective_status]}.${numbers}`;

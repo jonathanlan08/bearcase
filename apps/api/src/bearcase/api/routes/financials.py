@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from bearcase.api.deps import DbDep, DealDep, EditorDealDep, UserDep
 from bearcase.api.schemas import AdjustmentDecisionRequest, AdjustmentOut, FinancialsOut, MetricOut, PeriodOut, WaterfallStep
 from bearcase.audit import record
 from bearcase.chat.brief import invalidate_brief
 from bearcase.engine import formulas as f
-from bearcase.models import Adjustment, FinancialMetric, FinancialPeriod
-from bearcase.models.enums import AdjustmentDecision, AdjustmentDirection, MetricSource
+from bearcase.ingest.statement_mapper import SYNONYMS, map_income_statement, period_year
+from bearcase.models import Adjustment, Claim, Document, Evidence, FinancialMetric, FinancialPeriod
+from bearcase.models.enums import AdjustmentDecision, AdjustmentDirection, ClaimStatus, DocumentStatus, DocumentType, EvidenceKind, MetricSource
+from bearcase.pipeline.analyze import _chunks_from_evidence
 
 router = APIRouter(tags=["financials"])
 
@@ -155,3 +158,76 @@ def decide_adjustment(
     db.commit()
     invalidate_brief(deal.id)
     return get_financials(deal, db)
+
+
+@router.get("/deals/{deal_id}/financials/mapping")
+def statement_mapping(deal: DealDep, db: DbDep) -> dict[str, Any]:
+    """"Check what we read": how each income-statement sheet was interpreted before anything was calculated, and what
+    was not read at all. Re-runs the mapper over the persisted sheet rows (the same input the pipeline used), so the
+    answer is the interpretation behind the stored metrics, with the cells to open. Nothing here is calculated by a
+    model, and nothing is written."""
+    statements: list[dict[str, Any]] = []
+    unmapped_total = 0
+    ambiguous_total = 0
+    for doc in db.scalars(
+        select(Document).where(Document.deal_id == deal.id, Document.doc_type == DocumentType.FINANCIAL_STATEMENTS)
+    ):
+        rows = db.scalars(
+            select(Evidence)
+            .where(Evidence.document_id == doc.id, Evidence.kind == EvidenceKind.SHEET_ROW)
+            .order_by(Evidence.chunk_index)
+        ).all()
+        smap = map_income_statement(_chunks_from_evidence(rows))
+        if smap is None:
+            statements.append({"document_id": str(doc.id), "document_name": doc.display_name, "mapped": False, "reason": "No sheet named like an income statement with at least two year columns was found."})
+            continue
+        lines = []
+        for key in SYNONYMS:
+            cells = {}
+            for period in smap.periods:
+                mv = smap.lines[period].get(key)
+                if mv is None:
+                    continue
+                cells[period] = {
+                    "value": str(mv.value),
+                    "raw": mv.raw,
+                    "cell": mv.cell,
+                    "confidence": mv.confidence,
+                    "evidence_id": str(rows[mv.chunk_index].id) if mv.chunk_index < len(rows) else None,
+                }
+            if cells:
+                lines.append({"key": key, "cells": cells, "components": smap.ambiguous.get(key), "needs_review": key in smap.ambiguous or any(c["confidence"] < 0.8 for c in cells.values())})
+        unmapped_total += len(smap.unmapped_rows)
+        ambiguous_total += len(smap.ambiguous)
+        statements.append({
+            "document_id": str(doc.id),
+            "document_name": doc.display_name,
+            "mapped": True,
+            "sheet": smap.sheet,
+            "header_row": smap.header_row,
+            "scale": smap.scale,
+            "currency": "USD (assumed; the sheet states no currency)" if smap.scale == 1 else "USD (assumed)",
+            "periods": [{"label": p, "year": period_year(p)} for p in smap.periods],
+            "lines": lines,
+            "unmapped_rows": smap.unmapped_rows,
+        })
+    docs = db.scalars(select(Document).where(Document.deal_id == deal.id)).all()
+    review_metrics = db.scalar(
+        select(func.count(FinancialMetric.id)).where(FinancialMetric.deal_id == deal.id, FinancialMetric.requires_review.is_(True))
+    ) or 0
+    claims_by_status = {
+        status.value: (db.scalar(select(func.count(Claim.id)).where(Claim.deal_id == deal.id, Claim.status == status)) or 0)
+        for status in ClaimStatus
+    }
+    coverage = {
+        "documents_ready": sum(1 for d in docs if d.status == DocumentStatus.READY),
+        "documents_failed": sum(1 for d in docs if d.status == DocumentStatus.FAILED),
+        "documents_pending": sum(1 for d in docs if d.status not in (DocumentStatus.READY, DocumentStatus.FAILED)),
+        "statements_mapped": sum(1 for s in statements if s["mapped"]),
+        "statements_unmapped": sum(1 for s in statements if not s["mapped"]),
+        "unmapped_rows": unmapped_total,
+        "ambiguous_lines": ambiguous_total,
+        "metrics_requiring_review": int(review_metrics),
+        "claims_by_status": claims_by_status,
+    }
+    return {"statements": statements, "coverage": coverage}

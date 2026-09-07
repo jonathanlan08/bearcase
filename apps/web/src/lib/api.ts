@@ -98,6 +98,12 @@ export interface Period { id: string; label: string; ordinal: number; start_date
 export interface Adjustment { id: string; key: string; label: string; amount: string; direction: string; period_label: string; seller_rationale: string | null; decision: string; decision_rationale: string | null; decision_rule: string | null; evidence_ids: string[]; decided_by_user_id: string | null; sort_order: number }
 export interface WaterfallStep { label: string; amount: string; decision: string; included: boolean; running_total: string; adjustment_id: string | null }
 export interface Financials { periods: Period[]; metrics: Metric[]; adjustments: Adjustment[]; waterfall: WaterfallStep[] }
+/** "Check what we read": how each statement sheet was interpreted (api/routes/financials.py statement_mapping). */
+export interface MappedCell { value: string; raw: string; cell: string; confidence: number; evidence_id: string | null }
+export interface MappedLine { key: string; cells: Record<string, MappedCell>; components: string[] | null; needs_review: boolean }
+export interface MappedStatement { document_id: string; document_name: string; mapped: boolean; reason?: string; sheet?: string; header_row?: number | null; scale?: number; currency?: string; periods?: { label: string; year: number | null }[]; lines?: MappedLine[]; unmapped_rows?: { row: number; label: string }[] }
+export interface Coverage { documents_ready: number; documents_failed: number; documents_pending: number; statements_mapped: number; statements_unmapped: number; unmapped_rows: number; ambiguous_lines: number; metrics_requiring_review: number; claims_by_status: Record<string, number> }
+export interface StatementMapping { statements: MappedStatement[]; coverage: Coverage }
 
 export interface Assumption { key: string; label: string; value: string; unit: Unit }
 export interface YearRow { year: number; revenue: string; gross_profit: string; labor_opex: string; other_opex: string; addbacks: string; ebitda: string; depreciation_amortization: string; interest: string; principal: string; taxable_income: string; cash_taxes: string; working_capital_investment: string; cfads: string; debt_service: string; dscr: string | null; fcfe: string; closing_debt: string }
