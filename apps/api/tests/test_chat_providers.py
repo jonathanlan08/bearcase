@@ -1172,7 +1172,7 @@ def test_request_params_per_provider() -> None:
 
 def test_chat_client_fails_fast() -> None:
     c = openai_compat.make_client(GEMINI)
-    assert c.timeout == 45.0 and c.max_retries == 1 and str(c.base_url).startswith("https://generativelanguage")
+    assert c.timeout == 30.0 and c.max_retries == 0 and str(c.base_url).startswith("https://generativelanguage")
     assert chat_service.CHAT_TIMEOUT_SECONDS == 45.0 and chat_service.CHAT_MAX_RETRIES == 1
     proxied = openai_compat.make_client(resolve_chat_backend(settings(openrouter_api_key=FAKE_KEY)))
     assert proxied.max_retries == 1 and proxied.default_headers.get("X-Title") == "BearCase"
@@ -1227,7 +1227,7 @@ def test_busy_error_classification() -> None:
     assert busy(openai.BadRequestError("The model is overloaded", response=httpx.Response(400, request=req), body=None))
     assert not busy(openai.BadRequestError("bad json", response=httpx.Response(400, request=req), body=None))
     assert not busy(openai.AuthenticationError("bad key", response=httpx.Response(401, request=req), body=None))
-    assert not busy(openai.APIConnectionError(request=req))
+    assert busy(openai.APIConnectionError(request=req))  # unreachable models are handed over
     assert not busy(RuntimeError("boom")) and busy(RuntimeError("service unavailable"))
 
 
@@ -1305,7 +1305,7 @@ def test_anthropic_loop_reads_the_brief_caps_output_and_switches_on_overload(cli
     assert events[1][1]["from"] == "claude-haiku-4-5" and events[1][1]["to"] == "claude-sonnet-5"
     done = events[-1][1]
     assert done["model"] == "claude-sonnet-5" and done["error"] is None and done["content"] == GENERAL
-    assert constructed and constructed[0]["timeout"] == 45.0 and constructed[0]["max_retries"] == 1
+    assert constructed and constructed[0]["timeout"] == 30.0 and constructed[0]["max_retries"] == 0
     assert [c["model"] for c in fake.calls] == ["claude-haiku-4-5", "claude-sonnet-5"]
     for c in fake.calls:
         assert c["max_tokens"] == 2048 and c["tools"] == TOOLS
