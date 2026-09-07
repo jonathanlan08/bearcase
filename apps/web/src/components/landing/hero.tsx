@@ -130,11 +130,11 @@ export function Hero() {
                 Check the seller&apos;s numbers before you buy the business.
               </motion.h1>
               <motion.p {...enter(0.18)} className="mt-6 max-w-[480px] text-[17px] leading-relaxed text-fg-muted md:text-lg">
-                BearCase checks a seller&apos;s documents for financial inconsistencies and shows you what to investigate before buying the business.
+                Upload the seller&apos;s package. BearCase reads the statements, flags the claims the documents contradict, recomputes adjusted EBITDA, and hands you the questions to ask the seller, each with its source.
               </motion.p>
               <motion.div {...enter(0.3)} className="mt-8 flex flex-wrap gap-3">
                 <Link href="/demo" className={buttonClass("primary", "md", "h-11 px-5")}>Explore the demo</Link>
-                <Link href="/app" className={buttonClass("secondary", "md", "h-11 px-5")}>Open your workspace</Link>
+                <Link href="/app" className={buttonClass("secondary", "md", "h-11 px-5")}>Sign in or create an account</Link>
               </motion.div>
               <motion.p {...enter(0.38)} className="mt-4 text-sm text-fg-muted">Try a fictional deal. No account or API key needed.</motion.p>
             </div>

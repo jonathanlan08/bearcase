@@ -65,7 +65,7 @@ def test_brief_covers_terms_statement_metrics_addbacks_findings_scenarios_docume
     for m in db.scalars(select(FinancialMetric).where(FinancialMetric.deal_id == deal.id)):
         if m.source != MetricSource.EXTRACTED:
             assert f"- {m.label}" in text, m.label
-    assert "Verified adjusted EBITDA" in text and "$1,810,000" in text
+    assert "Checked adjusted EBITDA" in text and "$1,810,000" in text
     # the statement headline lines carry one cell per period
     assert re.search(r"- Revenue: FY\d{4} \$[\d,]+ \[M:[0-9a-f]+\] \| FY\d{4} \$[\d,]+ \[M:[0-9a-f]+\]", text)
     # add-backs with their decision and evidence ids

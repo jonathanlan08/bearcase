@@ -33,7 +33,7 @@ export default function TrustPage() {
 
         <section id="who" aria-labelledby="who-h" className="scroll-mt-24">
           <h2 id="who-h" className="mt-16 text-3xl">Who can see your deal</h2>
-          <p className="mt-6 text-fg-muted">A deal belongs to the account that created it, and every request for anything inside it, a document, a claim, a piece of evidence, a scenario, a chat thread, is checked against that owner first. Another account asking for your deal gets &ldquo;not found&rdquo;, not &ldquo;forbidden&rdquo;: the server does not confirm the deal exists. There is no sharing, no team, and no admin view yet; the only way another person sees your deal is by signing in as you.</p>
+          <p className="mt-6 text-fg-muted">A deal belongs to the account that created it, and every request for anything inside it, a document, a claim, a piece of evidence, a scenario, a chat thread, is checked against that owner first. Another account asking for your deal gets &ldquo;not found&rdquo;, not &ldquo;forbidden&rdquo;: the server does not confirm the deal exists. The owner can invite people by email as viewers or editors, and remove them; nobody else sees the deal, and there is no admin view. Never share your own sign-in.</p>
           <p className="mt-4 text-fg-muted">The demo works the same way. Each visitor to <Link href="/demo" className="text-fg underline underline-offset-2">/demo</Link> gets a private demo identity and their own copy of the fictional Northstar deal. Anything you upload, decide, or ask there is visible to your browser session only; the next visitor gets a fresh copy and cannot open yours. A signed-in account keeps its own identity when it opens the demo.</p>
         </section>
 
@@ -73,9 +73,9 @@ export default function TrustPage() {
           <ul className="mt-6 list-disc space-y-2 pl-5 text-fg-muted">
             <li>The default reader is rule-based. It finds the claims it has rules for and can miss or misread others; a model can be connected for extraction, but every status is still meant to be reviewed by a person.</li>
             <li>The evaluation suite scores the curated Northstar fixtures. Passing it shows the pipeline is consistent on documents it was built with, not that it is accurate on yours. Reviewed claims can be exported as a dataset so that a release can be measured against real corrections.</li>
-            <li>Uploads are checked by their content and never executed. Text inside a document that reads like an instruction is stored as inert content, labelled, and reported as a finding; it never changes what the system does.</li>
+            <li>Uploads are checked by their content and never executed. Text inside a document that reads like an instruction is stored as inert content, labelled, and reported as a finding. Document text reaches a model only as quoted data, never as instructions, and no financial number comes from a model. How well a live model resists instruction-like text has not been measured here.</li>
             <li>A deployment for confidential deals would still need encryption at rest, backups, monitoring, an external penetration test, and a paid model plan. None of those exist here yet.</li>
-            <li>BearCase is an educational prototype. It is not diligence software and does not provide financial, legal, tax, or investment advice. The Northstar deal and everyone in it are fictional.</li>
+            <li>BearCase is a first-pass check of a seller’s documents. It does not replace an accountant’s quality-of-earnings work or legal diligence, and it does not provide financial, legal, tax, or investment advice. The Northstar deal and everyone in it are fictional.</li>
           </ul>
           <p className="mt-8 text-sm text-fg-muted">How the checks themselves work, status by status and formula by formula, is on <Link href="/methodology" className="text-fg underline underline-offset-2">How we check claims</Link>.</p>
         </section>

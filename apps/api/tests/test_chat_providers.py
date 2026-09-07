@@ -948,7 +948,7 @@ def test_disconnect_mid_stream_persists_a_stopped_reply(db, demo) -> None:  # ty
     )
     audit = db.scalar(select(AuditEvent).where(AuditEvent.object_id == row.id, AuditEvent.event_type == "chat.reply"))
     assert audit is not None and audit.payload["error"] == "Stopped before the reply finished."
-    assert audit.payload["tools"] == ["get_adjustments"] and "scope=deal" in audit.summary
+    assert audit.payload["tools"] == ["get_adjustments"] and audit.summary.startswith("Chat reply failed (")
     # what was streamed before the stop is kept: read up to the first text frame, then close
     db.expire_all()  # a real request gets a fresh session; this test reuses one
     gen = chat_service.stream_reply(db, deal, thread, deal.owner_id, "What are the biggest risks?")

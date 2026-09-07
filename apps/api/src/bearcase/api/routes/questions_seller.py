@@ -96,10 +96,17 @@ def seller_questions(deal: DealDep, db: DbDep) -> dict[str, Any]:
 
 
 @router.get("/deals/{deal_id}/seller-questions/export")
-def export_seller_questions(deal: DealDep, db: DbDep, user: UserDep, format: str = "md") -> Response:
+def export_seller_questions(
+    deal: DealDep, db: DbDep, user: UserDep, format: str = "md", ids: str | None = None
+) -> Response:
+    """The questions as a file. `ids` (comma-separated question ids from the list) limits the export to the
+    ticked questions, so what leaves the workspace is exactly what the page shows as selected."""
     if format not in {"md", "txt"}:
         raise HTTPException(400, "format must be md or txt.")
     data = build_seller_questions(db, deal)
+    if ids is not None:
+        wanted = {i.strip() for i in ids.split(",") if i.strip()}
+        data = {**data, "questions": [q for q in data["questions"] if q["id"] in wanted]}
     count = len(data["questions"])
     record(
         db,

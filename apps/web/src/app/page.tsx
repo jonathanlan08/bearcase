@@ -112,7 +112,7 @@ export default function LandingPage() {
           <div className="mx-auto max-w-[1200px] px-6 py-24 md:py-32 lg:px-10">
             <div className="max-w-[640px]">
               <h2 className="text-3xl md:text-4xl">A review the committee can check.</h2>
-              <p className="mt-4 text-[17px] leading-relaxed text-fg-muted">Verified financials, the claim ledger, contradictions, unsupported assumptions, customer concentration, adjustments, scenarios, risks, open questions for the seller, and every reviewer decision, with citations that open the source. Ask the deal a question in plain language and get the same discipline back.</p>
+              <p className="mt-4 text-[17px] leading-relaxed text-fg-muted">Checked financials, the claim ledger, contradictions, unsupported assumptions, customer concentration, adjustments, scenarios, risks, open questions for the seller, and every reviewer decision, with citations that open the source. Ask the deal a question in plain language and get the same discipline back.</p>
             </div>
             <div className="mt-12"><ReportFigure /></div>
           </div>
@@ -146,7 +146,7 @@ export default function LandingPage() {
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Link href="/demo" className={buttonClass("primary", "md", "h-11 px-5")}>Explore the demo</Link>
-                <Link href="/app" className={buttonClass("secondary", "md", "h-11 px-5")}>Open your workspace</Link>
+                <Link href="/app" className={buttonClass("secondary", "md", "h-11 px-5")}>Sign in or create an account</Link>
               </div>
               <p className="mt-4 text-sm text-fg-muted">Try a fictional deal. No account or API key needed. <Link href="/trust" className="underline underline-offset-2 hover:text-fg">How we handle your documents</Link>.</p>
               <p className="mt-8 max-w-[560px] text-sm text-fg-muted">Northstar HVAC is fictional. BearCase is an educational prototype and does not provide financial, legal, tax, or investment advice.</p>

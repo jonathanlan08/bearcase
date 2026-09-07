@@ -210,8 +210,11 @@ def test_progress_transitions_upload_decision_evidence_export(db):
 
     detail = c.get(f"/api/deals/{deal_id}/claims/{claim['id']}").json()
     eid = detail["source_evidence"]["id"]
+    # Reading the row (what a citation chip does for its label) is not an open; the viewer reports one.
     assert c.get(f"/api/deals/{deal_id}/evidence/{eid}").status_code == 200
-    assert c.get(f"/api/deals/{deal_id}/evidence/{eid}").status_code == 200
+    assert _progress(c, deal_id)["evidence"] is False
+    assert c.post(f"/api/deals/{deal_id}/evidence/{eid}/opened").status_code == 204
+    assert c.post(f"/api/deals/{deal_id}/evidence/{eid}/opened").status_code == 204
     opened = db.scalars(
         select(AuditEvent).where(AuditEvent.deal_id == uuid.UUID(deal_id), AuditEvent.event_type == "evidence.opened")
     ).all()
@@ -230,8 +233,19 @@ def test_progress_counts_a_chat_message_as_reviewing_findings(owner, db):
     db.add(thread)
     db.flush()
     db.add(ChatMessage(thread_id=thread.id, role="user", content="hi", provider="mock", model="rules-v1", prompt_version="v0"))
+    failed = ChatMessage(thread_id=thread.id, role="assistant", content="", provider="mock", model="rules-v1", prompt_version="v0")
+    failed.error = "Groq rejected the API key."
+    db.add(failed)
+    db.commit()
+    assert _progress(c, deal_id)["findings"] is False, "a question with no answer, or a failed answer, is not reviewing"
+    ok = ChatMessage(thread_id=thread.id, role="assistant", content="The add-backs…", provider="mock", model="rules-v1", prompt_version="v0")
+    db.add(ok)
     db.commit()
     assert _progress(c, deal_id)["findings"] is True
+    # leave the thread for the usage test below, without the assistant rows it does not expect
+    db.delete(failed)
+    db.delete(ok)
+    db.commit()
 
 
 # ---------- usage ----------------------------------------------------------------------------

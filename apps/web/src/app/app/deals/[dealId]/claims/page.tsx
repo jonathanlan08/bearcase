@@ -87,7 +87,7 @@ export default function ClaimsPage() {
   return (
     <div className="flex min-h-[calc(100svh-0px)] flex-col">
       <PageHeader kicker={kicker} title="Claim Audit">
-        <p className="mt-2 max-w-3xl text-sm text-fg-muted">Every sentence the seller’s documents present as a fact, checked against the other documents. Open a claim, read the evidence, then record what you decide.</p>
+        <p className="mt-2 max-w-3xl text-sm text-fg-muted">The factual claims the reader found in the seller’s documents, each checked against the other documents. It can miss claims and misread others, so open a claim, read the evidence, then record what you decide.</p>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <div className="flex flex-wrap gap-1" role="group" aria-label="Filter by status">
             <FilterChip active={status === "all"} onClick={() => setStatus("all")}>All <span className="num">{claims.data?.length ?? 0}</span></FilterChip>

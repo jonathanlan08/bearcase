@@ -9,8 +9,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
+import re
+
 from bearcase.engine import formulas as f
 from bearcase.engine.money import Calc
+
+_YEAR = re.compile(r"(20\d{2})")
+
+
+def _year(label: str) -> int | None:
+    m = _YEAR.search(label)
+    return int(m.group(1)) if m else None
+
+
+def _with_note(c: Calc, note: str) -> Calc:
+    return Calc(c.key, c.value, c.unit, c.formula, c.inputs, c.missing, (*c.notes, note))
 
 # Canonical line keys the statement mapper produces.
 LINE_KEYS = [
@@ -48,9 +61,12 @@ class PeriodCalc:
 
 
 def period_metrics(periods: dict[str, dict[str, Decimal | None]]) -> list[PeriodCalc]:
-    """Compute per-period and cross-period metrics. Periods must be ordered oldest → newest."""
+    """Compute per-period and cross-period metrics. Periods are sorted oldest → newest here from the year in
+    each label (FY2022, 2023, CY2024); labels without a year keep the caller's order after the dated ones.
+    Elapsed time comes from the years themselves, so FY2022 → FY2024 is two years whether or not FY2023 is
+    present, and a growth figure across a gap is noted for review."""
     out: list[PeriodCalc] = []
-    labels = list(periods.keys())
+    labels = sorted(periods.keys(), key=lambda lb: (_year(lb) is None, _year(lb) or 0))
     for i, label in enumerate(labels):
         li = periods[label]
         rev = li.get("revenue")
@@ -79,11 +95,20 @@ def period_metrics(periods: dict[str, dict[str, Decimal | None]]) -> list[Period
             )
         out.append(PeriodCalc(label, recon))
         if i > 0:
-            prior = periods[labels[i - 1]].get("revenue")
-            out.append(PeriodCalc(label, f.revenue_growth(rev, prior)))
+            prior_label = labels[i - 1]
+            prior = periods[prior_label].get("revenue")
+            growth = f.revenue_growth(rev, prior)
+            y0, y1 = _year(prior_label), _year(label)
+            if y0 is not None and y1 is not None and y1 - y0 != 1:
+                growth = _with_note(
+                    growth, f"{prior_label} to {label} spans {y1 - y0} years, not one; review required"
+                )
+            out.append(PeriodCalc(label, growth))
     if len(labels) >= 2:
         first, last = periods[labels[0]].get("revenue"), periods[labels[-1]].get("revenue")
-        out.append(PeriodCalc(labels[-1], f.cagr(first, last, len(labels) - 1)))
+        y0, y1 = _year(labels[0]), _year(labels[-1])
+        years = (y1 - y0) if (y0 is not None and y1 is not None and y1 > y0) else len(labels) - 1
+        out.append(PeriodCalc(labels[-1], f.cagr(first, last, years)))
     return out
 
 

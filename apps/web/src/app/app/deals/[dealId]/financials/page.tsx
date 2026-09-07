@@ -27,12 +27,12 @@ const CALC: Array<[string, string, string]> = [["revenue_growth", "Revenue growt
 const DEAL: Array<[string, string, string]> = [
   ["cagr", "Revenue CAGR", "Average yearly revenue growth over the statement periods."],
   ["ebitda_adjusted_seller", "Seller adjusted EBITDA", "Reported EBITDA plus every adjustment the seller asks you to accept."],
-  ["ebitda_adjusted_verified", "Verified adjusted EBITDA", "Reported EBITDA plus only the adjustments that passed review."],
+  ["ebitda_adjusted_verified", "Checked adjusted EBITDA", "Reported EBITDA plus only the adjustments that passed the rules or a reviewer. Rule-based until a person records a decision."],
   ["enterprise_value", "Enterprise value", "The price for the whole business, debt included."],
   ["ev_to_ebitda_seller", "EV / seller EBITDA", "Price paid per dollar of the seller's EBITDA."],
-  ["ev_to_ebitda_verified", "EV / verified EBITDA", "Price paid per dollar of verified EBITDA; higher means you pay more for the same earnings."],
+  ["ev_to_ebitda_verified", "EV / checked EBITDA", "Price paid per dollar of checked EBITDA; higher means you pay more for the same earnings."],
   ["debt_to_ebitda_seller", "Debt / seller EBITDA", "Years of the seller's EBITDA needed to repay the acquisition debt."],
-  ["debt_to_ebitda_verified", "Debt / verified EBITDA", "Years of verified EBITDA needed to repay the acquisition debt."],
+  ["debt_to_ebitda_verified", "Debt / checked EBITDA", "Years of checked EBITDA needed to repay the acquisition debt."],
   ["annual_debt_service", "Annual debt service", "Interest plus principal due to the lender each year."],
   ["cfads_base", "CFADS (base, year 1)", "Cash flow available for debt service: EBITDA after capex, cash taxes, and working capital."],
   ["dscr_base", "DSCR (base, year 1)", "Cash available ÷ debt payments due. Below 1.00x the business cannot cover its loan."],
@@ -127,11 +127,11 @@ function WhatChanged({ f, dealId, onOpen, onDecide }: { f: Financials; dealId: s
         <div>
           <dl className="grid grid-cols-2 gap-3">
             <div><dt className="text-xs text-fg-muted">Seller’s adjusted EBITDA</dt><dd className="num mt-1 text-2xl text-graphite">{seller ? fmtValue(seller.value, seller.unit) : "—"}</dd></div>
-            <div><dt className="text-xs text-fg-muted">Verified adjusted EBITDA</dt><dd className="num mt-1 text-2xl text-accent">{verified ? fmtValue(verified.value, verified.unit) : "—"}{verified?.requires_review && <StatusGlyph status="review_required" size={12} className="ml-2 inline align-middle" />}</dd></div>
+            <div><dt className="text-xs text-fg-muted">Checked adjusted EBITDA</dt><dd className="num mt-1 text-2xl text-accent">{verified ? fmtValue(verified.value, verified.unit) : "—"}{verified?.requires_review && <StatusGlyph status="review_required" size={12} className="ml-2 inline align-middle" />}</dd></div>
             <div><dt className="text-xs text-fg-muted">Difference</dt><dd className={`num mt-1 text-lg ${tone}`}>{diff === null ? "—" : `${diff >= 0 ? "+" : "−"}${fmtMoney(Math.abs(diff))}${pct !== null ? ` (${fmtPct(pct, 1, true)})` : ""}`}</dd></div>
             <div><dt className="text-xs text-fg-muted">Reported EBITDA (statements)</dt><dd className="num mt-1 text-lg">{reported ? fmtValue(reported.value, reported.unit) : "—"}</dd></div>
           </dl>
-          <p className="mt-3 text-sm text-fg-muted">{accepted} of {f.adjustments.length} seller adjustments were accepted{excluded.length ? `; ${excluded.length} ${excluded.length === 1 ? "was" : "were"} excluded for the reasons listed here` : ""}. Every decision can be overridden with a note, which recomputes the verified number.</p>
+          <p className="mt-3 text-sm text-fg-muted">{accepted} of {f.adjustments.length} seller adjustments were accepted{excluded.length ? `; ${excluded.length} ${excluded.length === 1 ? "was" : "were"} excluded for the reasons listed here` : ""}. Decisions without a reviewer’s note are rule-based and provisional; recording your own decision recomputes the checked number and marks it reviewed.</p>
         </div>
         <div>
           {excluded.length === 0 ? <p className="text-sm text-fg-muted">Every seller adjustment passed review, so the verified number equals the seller’s. The bridge below shows each step.</p> : (
@@ -220,14 +220,14 @@ function DecisionDialog({ dealId, adjustmentId, onClose, f }: { dealId: string; 
   const a = f.adjustments.find((x) => x.id === adjustmentId);
   const [decision, setDecision] = useState("accepted");
   const [rationale, setRationale] = useState("");
-  const m = useMutation({ mutationFn: () => api.post(`/api/deals/${dealId}/adjustments/${adjustmentId}/decision`, { decision, rationale }), onSuccess: () => { qc.invalidateQueries({ queryKey: qk.financials(dealId) }); qc.invalidateQueries({ queryKey: qk.summary(dealId) }); qc.invalidateQueries({ queryKey: qk.audit(dealId) }); toast({ title: "Decision recorded", description: "Verified adjusted EBITDA and multiples were recomputed.", tone: "success" }); onClose(); }, onError: (e) => toast({ title: "Could not record decision", description: String(e), tone: "error" }) });
+  const m = useMutation({ mutationFn: () => api.post(`/api/deals/${dealId}/adjustments/${adjustmentId}/decision`, { decision, rationale }), onSuccess: () => { qc.invalidateQueries({ queryKey: qk.financials(dealId) }); qc.invalidateQueries({ queryKey: qk.summary(dealId) }); qc.invalidateQueries({ queryKey: qk.audit(dealId) }); toast({ title: "Decision recorded", description: "Checked adjusted EBITDA and multiples were recomputed.", tone: "success" }); onClose(); }, onError: (e) => toast({ title: "Could not record decision", description: String(e), tone: "error" }) });
   return (
     <Dialog.Root open={!!a} onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-ink-950/40" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(520px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-[var(--radius-3)] border border-hairline bg-bg-raised p-5 shadow-[var(--shadow-2)] outline-none">
           <Dialog.Title className="text-lg font-medium">Decide on “{a?.label}”</Dialog.Title>
-          <Dialog.Description className="mt-1 text-sm text-fg-muted">The rule-based decision ({STATUS_LABEL[a?.decision ?? ""] ?? a?.decision.replace("_", " ")}) stays in the audit trail. Your decision recomputes verified adjusted EBITDA.</Dialog.Description>
+          <Dialog.Description className="mt-1 text-sm text-fg-muted">The rule-based decision ({STATUS_LABEL[a?.decision ?? ""] ?? a?.decision.replace("_", " ")}) stays in the audit trail. Your decision recomputes checked adjusted EBITDA.</Dialog.Description>
           <form className="mt-4 flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); if (rationale.trim()) m.mutate(); }}>
             <Field label="Decision">{(p) => <select id={p.id} className={inputClass(false)} value={decision} onChange={(e) => setDecision(e.target.value)}>{["accepted", "rejected", "review_required", "unsupported"].map((d) => <option key={d} value={d}>{STATUS_LABEL[d] ?? titleCase(d)}</option>)}</select>}</Field>
             <Field label="Rationale" required help="Why you decided this way; it appears in the audit history and the report.">{(p) => <textarea id={p.id} aria-describedby={p.describedBy} className={inputClass(false, "h-24 py-2")} value={rationale} onChange={(e) => setRationale(e.target.value)} required />}</Field>

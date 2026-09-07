@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Suspense, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { ApiError, billing, errorDetail, fmtPrice, type BillingStatus } from "@/lib/api";
+import { ApiError, billing, errorDetail, fmtPrice, type BillingOffer } from "@/lib/api";
 import { SiteNav, SiteFooter } from "@/components/landing/chrome";
 import { Button, buttonClass } from "@/components/ui/button";
 import { fmtDate } from "@/lib/format";
@@ -14,7 +14,7 @@ const CONTACT = process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? "";
 /** What one pilot covers. Wording follows docs/go-to-market.md ("Bounded pilot offer"); the price comes from the API. */
 const SCOPE = [
   { title: "One document set, one deal", body: "You upload the seller's documents for a single deal. Text-layer PDFs, XLSX, and CSV; an income statement sheet must be named like one." },
-  { title: "A human check before delivery", body: "We read every contradiction and every excluded add-back ourselves before anything is sent, and say in writing what was checked and what was not." },
+  { title: "A human check before delivery", body: "A person reads every contradiction, every add-back the rules accepted or excluded, and every statement mapping the rules flagged, before anything is sent, and says in writing what was checked and what was not." },
   { title: "Delivered within five business days", body: "Two files: the seller-questions export (Markdown) and the red-team report (PDF). Each states where every figure came from." },
 ];
 
@@ -28,7 +28,7 @@ const LIMITS = [
   "A citation shows where a statement came from, not that it is true. Nothing in the deliverable is investment, legal, or tax advice.",
 ];
 
-function StartPilot({ status }: { status: BillingStatus }) {
+function StartPilot({ status, signedIn }: { status: BillingOffer; signedIn: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const checkout = useMutation({
     mutationFn: () => billing.checkout(),
@@ -36,6 +36,17 @@ function StartPilot({ status }: { status: BillingStatus }) {
     onError: (e) => setError(e instanceof ApiError && e.status === 401 ? "Sign in first, then come back to start the pilot." : errorDetail(e, "Checkout could not be started.")),
   });
   const price = fmtPrice(status.pilot.amount_cents, status.pilot.currency);
+  if (!signedIn) {
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-fg-muted">The pilot is {price} for one deal. Create an account or sign in first; you come back here to pay.</p>
+        <div className="flex flex-wrap gap-3">
+          <Link href="/app?next=/pilot" className={buttonClass("primary")}>Sign in or create an account</Link>
+          {CONTACT && <a href={`mailto:${CONTACT}?subject=${encodeURIComponent("BearCase pilot")}`} className={buttonClass("secondary")}>Ask a question first</a>}
+        </div>
+      </div>
+    );
+  }
   if (!status.configured) {
     return (
       <div className="flex flex-col gap-3">
@@ -64,7 +75,10 @@ function Outcome() {
 }
 
 export default function PilotPage() {
+  // The offer is public; purchases need a session. A 401 on status only means "not signed in".
+  const offer = useQuery({ queryKey: ["billing-offer"], queryFn: billing.offer, retry: false });
   const status = useQuery({ queryKey: ["billing-status"], queryFn: billing.status, retry: false });
+  const signedIn = status.isSuccess;
   const purchases = status.data?.purchases ?? [];
   return (
     <div data-world="ink" className="min-h-svh bg-bg text-fg">
@@ -90,13 +104,13 @@ export default function PilotPage() {
         <section aria-labelledby="price-h">
           <h2 id="price-h" className="mt-16 text-3xl">Price</h2>
           <div className="mt-6 rounded-[var(--radius-3)] border border-hairline bg-bg-raised p-6">
-            {status.isPending && <p className="text-fg-muted">Loading the offer.</p>}
-            {status.isError && <p role="alert" className="text-fg-muted">The offer could not be loaded.{CONTACT && <> Write to <a href={`mailto:${CONTACT}`} className="text-fg underline underline-offset-2">{CONTACT}</a>.</>}</p>}
-            {status.data && (
+            {offer.isPending && <p className="text-fg-muted">Loading the offer.</p>}
+            {offer.isError && <p role="alert" className="text-fg-muted">The offer could not be loaded.{CONTACT && <> Write to <a href={`mailto:${CONTACT}`} className="text-fg underline underline-offset-2">{CONTACT}</a>.</>}</p>}
+            {offer.data && (
               <>
-                <p className="text-3xl"><span className="num">{fmtPrice(status.data.pilot.amount_cents, status.data.pilot.currency)}</span> <span className="text-base text-fg-muted">per deal</span></p>
-                <p className="mt-2 text-sm text-fg-muted">{status.data.pilot.description}</p>
-                <div className="mt-6"><StartPilot status={status.data} /></div>
+                <p className="text-3xl"><span className="num">{fmtPrice(offer.data.pilot.amount_cents, offer.data.pilot.currency)}</span> <span className="text-base text-fg-muted">per deal</span></p>
+                <p className="mt-2 text-sm text-fg-muted">{offer.data.pilot.description}</p>
+                <div className="mt-6"><StartPilot status={offer.data} signedIn={signedIn} /></div>
               </>
             )}
           </div>

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "radix-ui";
 import { X } from "lucide-react";
-import { useDocEvidence } from "@/components/app/hooks";
+import { reportEvidenceOpened, useDocEvidence } from "@/components/app/hooks";
 import { Skeleton } from "@/components/ui/primitives";
 import { fmtCell, fmtLocator } from "@/lib/format";
 import type { Evidence } from "@/lib/api";
@@ -45,6 +45,10 @@ function ViewerBody({ dealId, target }: { dealId: string; target: ViewerTarget }
     const t = window.setTimeout(() => targetRef.current?.scrollIntoView({ block: "center", behavior: "auto" }), 60);
     return () => window.clearTimeout(t);
   }, [q.data]);
+  // One "opened" report per evidence shown in the viewer: the audit trail and the workflow progress read it.
+  useEffect(() => {
+    if (target.evidenceId) void reportEvidenceOpened(dealId, target.evidenceId);
+  }, [dealId, target.evidenceId]);
   const highlight = useMemo(() => new Set([...(target.highlightIds ?? []), ...(target.evidenceId ? [target.evidenceId] : [])]), [target.highlightIds, target.evidenceId]);
   const setTarget = (isTarget: boolean) => (el: HTMLElement | null) => { if (isTarget) targetRef.current = el; };
   return (

@@ -94,7 +94,11 @@ export default function QuestionsPage() {
     }
   };
   const download = useMutation({
-    mutationFn: () => api.download(`/api/deals/${dealId}/seller-questions/export?format=md`, "seller-questions.md"),
+    mutationFn: () => {
+      const ids = all.filter((q) => included(q.id)).map((q) => q.id);
+      const sel = ids.length === all.length ? "" : `&ids=${encodeURIComponent(ids.join(","))}`;
+      return api.download(`/api/deals/${dealId}/seller-questions/export?format=md${sel}`, "seller-questions.md");
+    },
     onSuccess: ({ blob, filename }) => {
       saveBlob(blob, filename);
       // The export is the "questions" step of the workflow and an audit entry; both read from the server.
@@ -117,10 +121,10 @@ export default function QuestionsPage() {
           </>
         )
       }>
-        <p className="mt-2 max-w-3xl text-sm text-fg-muted">Every question here comes from a finding: a claim the documents disagree with, a claim with nothing behind it, or a document that is missing. Each one carries the evidence that raised it, so the seller can answer with a page or a cell rather than a story. Untick the ones you do not want to send, then copy the list or download it.</p>
+        <p className="mt-2 max-w-3xl text-sm text-fg-muted">Every question here comes from a finding: a claim the documents disagree with, a claim with nothing behind it, or a document that is missing. Each one carries the evidence that raised it, so the seller can answer with a page or a cell rather than a story. Untick the ones you do not want to send, then copy the list or download it; only the ticked questions leave the workspace.</p>
         {questions.data && all.length > 0 && (
           <p className="mt-2 text-xs text-fg-muted">
-            Built from <span className="num">{questions.data.generated_from.findings}</span> findings and <span className="num">{questions.data.generated_from.claims}</span> claims, the same list as the report&apos;s management questions. <span className="num">{includedCount}</span> of <span className="num">{all.length}</span> ticked. Copy uses the ticked questions; the download and the report include every question.
+            Built from <span className="num">{questions.data.generated_from.findings}</span> findings and <span className="num">{questions.data.generated_from.claims}</span> claims, the same list as the report&apos;s management questions. <span className="num">{includedCount}</span> of <span className="num">{all.length}</span> ticked. Copy and download both send only the ticked questions; the report keeps every question.
           </p>
         )}
       </PageHeader>

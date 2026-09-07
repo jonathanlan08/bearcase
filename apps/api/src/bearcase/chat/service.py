@@ -332,6 +332,9 @@ def stream_reply(
         # paragraph rule alone.
         if tool_calls and not (citations["evidence"] or citations["metrics"]):
             grounded = False
+        # A reply that ended in an error is not an answer: never grounded, whatever was streamed before.
+        if err:
+            grounded = False
         # Scope tells the UI how to label the answer. "general" only when nothing touched the deal room (no
         # tool ran, no marker resolved) and no paragraph states an uncited figure; anything else is "deal", so
         # a reply that restates deal numbers from memory is never labelled general knowledge.
@@ -354,7 +357,11 @@ def stream_reply(
             event_type="chat.reply",
             object_type="chat_message",
             object_id=assistant.id,
-            summary=f"Chat reply ({provider}/{answered}), scope={scope}, grounded={grounded}",
+            summary=(
+                f"Chat reply failed ({provider}/{answered}): {err}"
+                if err
+                else f"Chat reply ({provider}/{answered}), scope={scope}, grounded={grounded}"
+            ),
             payload={
                 "thread_id": str(thread.id),
                 "scope": scope,

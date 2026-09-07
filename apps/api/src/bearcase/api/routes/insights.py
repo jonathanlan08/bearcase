@@ -44,12 +44,18 @@ def _any(db: Session, stmt: Any) -> bool:
 @router.get("/deals/{deal_id}/progress")
 def progress(deal: DealDep, db: DbDep) -> dict[str, Any]:
     """Which workflow steps this deal has completed. Findings count as reviewed when a person recorded a claim
-    decision or asked the deal a question (views are not logged); evidence when an evidence row was opened
-    through the API; questions when the seller questions were exported."""
+    decision or received an answer from the assistant (views and failed replies are not counted); evidence when
+    the viewer reported an open (fetching a row for a label does not count); questions when the seller
+    questions were copied or downloaded."""
     done = {
         "documents": _any(db, select(Document.id).where(Document.deal_id == deal.id, Document.status == DocumentStatus.READY)),
         "findings": _any(db, select(ReviewDecision.id).where(ReviewDecision.deal_id == deal.id))
-        or _any(db, select(ChatMessage.id).join(ChatThread).where(ChatThread.deal_id == deal.id)),
+        or _any(
+            db,
+            select(ChatMessage.id)
+            .join(ChatThread)
+            .where(ChatThread.deal_id == deal.id, ChatMessage.role == "assistant", ChatMessage.error.is_(None)),
+        ),
         "evidence": _any(
             db, select(AuditEvent.id).where(AuditEvent.deal_id == deal.id, AuditEvent.event_type == "evidence.opened")
         ),

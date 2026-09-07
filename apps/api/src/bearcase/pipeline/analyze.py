@@ -85,7 +85,7 @@ METRIC_LABELS = {
     "gross_margin": "Gross margin",
     "operating_margin": "Operating margin",
     "ebitda_reported": "Reported EBITDA (reconciled)",
-    "ebitda_adjusted_verified": "Verified adjusted EBITDA",
+    "ebitda_adjusted_verified": "Checked adjusted EBITDA",
     "ebitda_adjusted_seller": "Seller adjusted EBITDA",
     "customer_concentration_top1": "Largest customer share of revenue",
     "recurring_revenue_pct": "Contract-supported recurring revenue",
@@ -221,7 +221,14 @@ def build_statement_metrics(
                     source=MetricSource.EXTRACTED,
                     period=period,
                     evidence_ids=[rows[mv.chunk_index].id],
-                    input_snapshot={"sheet": mv.sheet, "cell": mv.cell, "row": mv.row, "document_id": str(doc.id)},
+                    input_snapshot={
+                        "sheet": mv.sheet,
+                        "cell": mv.cell,
+                        "row": mv.row,
+                        "document_id": str(doc.id),
+                        "scale": smap.scale,
+                        **({"components": smap.ambiguous[key]} if key in smap.ambiguous else {}),
+                    },
                     confidence=mv.confidence,
                     requires_review=mv.confidence < 0.8,
                     raw_value=mv.raw,
@@ -493,7 +500,7 @@ def review_adjustments(db: Session, deal: Deal, periods: dict[str, FinancialPeri
             if m_owner and m_owner.value is not None and adj.amount < m_owner.value:
                 ev = [uuid.UUID(x) for x in m_owner.evidence_ids] + note_for("owner")
                 adj.decision, adj.decision_rule = AdjustmentDecision.ACCEPTED, "supported_by_statement_line"
-                adj.decision_rationale = f"The {latest.label} owner compensation line of ${m_owner.value:,.0f} supports a normalization of ${adj.amount:,.0f}; the residual salary remains above zero."
+                adj.decision_rationale = f"The {latest.label} owner compensation line of ${m_owner.value:,.0f} covers a normalization of ${adj.amount:,.0f}, leaving ${m_owner.value - adj.amount:,.0f}. The statements do not say whether that residual is a market salary for a replacement manager; a person should confirm it."
             else:
                 adj.decision, adj.decision_rule, adj.decision_rationale = (
                     AdjustmentDecision.REVIEW_REQUIRED,

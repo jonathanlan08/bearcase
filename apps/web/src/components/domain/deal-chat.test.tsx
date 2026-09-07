@@ -433,7 +433,7 @@ describe("DealChat panel", () => {
     act(() => { askTheDeal("And the contracts?", { send: true }); });
     await waitFor(() => expect(posts).toHaveLength(2), { timeout: 5000 });
     expect(posts[1]).toEqual({ message: "And the contracts?", thread_id: "t1" });
-    expect(await screen.findAllByText("Resumed reply.", {}, { timeout: 5000 })).toHaveLength(2);
+    await waitFor(() => expect(screen.getAllByText("Resumed reply.")).toHaveLength(2), { timeout: 5000 });
   });
 
   it("names no provider or model when live and hides the model picker unless the server opts in", async () => {

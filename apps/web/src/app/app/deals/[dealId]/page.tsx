@@ -204,7 +204,7 @@ export default function OverviewPage() {
           <Panel title="Adjusted EBITDA" actions={<Link href={`${base}/financials`} className="text-xs text-accent hover:underline">Open Financial Verification</Link>}>
             {d.verified_adjusted_ebitda === null ? <p className="text-sm text-fg-muted">Financial statements not yet mapped.</p> : (
               <div className="flex flex-col gap-3">
-                {[["Reported", d.reported_ebitda, "bg-graphite"], ["Seller adjusted", d.seller_adjusted_ebitda, "border border-graphite"], ["Verified adjusted", d.verified_adjusted_ebitda, "bg-accent"]].map(([label, v, cls]) => {
+                {[["Reported", d.reported_ebitda, "bg-graphite"], ["Seller adjusted", d.seller_adjusted_ebitda, "border border-graphite"], ["Checked adjusted", d.verified_adjusted_ebitda, "bg-accent"]].map(([label, v, cls]) => {
                   const max = Math.max(Number(d.seller_adjusted_ebitda ?? 0), Number(d.verified_adjusted_ebitda ?? 0), Number(d.reported_ebitda ?? 0)) || 1;
                   return (
                     <div key={label as string}>

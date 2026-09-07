@@ -34,6 +34,24 @@ SYNONYMS: dict[str, list[str]] = {
     "net_income": ["net income", "net earnings", "net profit"],
 }
 _PERIOD = re.compile(r"^(FY|CY)?\s?(20\d{2})[A-Z]?$", re.I)
+_YEAR = re.compile(r"(20\d{2})")
+# A statement header that states its scale: "(USD in thousands)", "$000s", "in millions". Applied to every
+# mapped value; the raw cell text is kept beside the scaled value so a reviewer sees both.
+_SCALE = re.compile(r"in\s+thousands|(?<![\d,.])\$?\s?000'?s?\b|\bthousands\b|in\s+millions|\bmillions\b|\$mm\b|\$m\b", re.I)
+_MILLIONS = re.compile(r"million|\$mm\b|\$m\b", re.I)
+
+
+def detect_scale(text: str) -> int:
+    """1, 1_000, or 1_000_000 from a title such as "Income Statement (USD in thousands)"."""
+    m = _SCALE.search(text)
+    if not m:
+        return 1
+    return 1_000_000 if _MILLIONS.search(m.group(0)) else 1_000
+
+
+def period_year(label: str) -> int | None:
+    m = _YEAR.search(label)
+    return int(m.group(1)) if m else None
 
 
 @dataclass
@@ -54,6 +72,10 @@ class StatementMap:
     lines: dict[str, dict[str, MappedValue]] = field(default_factory=dict)  # period -> line_key -> value
     unmapped_rows: list[dict[str, Any]] = field(default_factory=list)
     header_row: int | None = None
+    scale: int = 1  # multiplier stated by the sheet (thousands, millions); values are already multiplied
+    # Line keys whose value was assembled from several component rows because no total row exists; a
+    # reviewer must confirm the sum. {line_key: [row labels]}
+    ambiguous: dict[str, list[str]] = field(default_factory=dict)
 
     def as_periods(self) -> dict[str, dict[str, Decimal | None]]:
         return {p: {k: (mv.value if (mv := self.lines.get(p, {}).get(k)) else None) for k in SYNONYMS} for p in self.periods}
@@ -117,6 +139,7 @@ def _map_sheet(sheet: str, rows: list[tuple[int, ParsedChunk]]) -> StatementMap 
     header: list[str] | None = None
     header_row = None
     period_cols: dict[int, str] = {}
+    scale = 1
     for _, c in rows:
         values = c.structured["values"] if c.structured else []
         found = {ci: v.strip().upper().replace(" ", "") for ci, v in enumerate(values) if _PERIOD.match(v.strip())}
@@ -125,14 +148,25 @@ def _map_sheet(sheet: str, rows: list[tuple[int, ParsedChunk]]) -> StatementMap 
             header_row = c.locator["row"]
             period_cols = {ci: (v if v.startswith("FY") else f"FY{v}") for ci, v in found.items()}
             break
+        # rows above the header are titles: "Income Statement (USD in thousands)"
+        scale = max(scale, detect_scale(" ".join(v for v in values if v)))
     if header is None:
         return None
-    periods = [period_cols[ci] for ci in sorted(period_cols)]
-    smap = StatementMap(sheet=sheet, periods=periods, header_row=header_row)
+    scale = max(scale, detect_scale(sheet))
+    # Columns keep whatever order the seller chose; the statement is always oldest -> newest, because every
+    # cross-period calculation (growth, CAGR) assumes that. Two columns naming the same year are rejected.
+    labelled = sorted(period_cols.items(), key=lambda kv: (period_year(kv[1]) or 0, kv[0]))
+    periods = [label for _, label in labelled]
+    if len(set(periods)) != len(periods):
+        return None
+    smap = StatementMap(sheet=sheet, periods=periods, header_row=header_row, scale=scale)
     for p in periods:
         smap.lines[p] = {}
     from openpyxl.utils import get_column_letter
 
+    # Every row that matches a line, per period, so components ("Revenue - service", "Revenue - installation")
+    # can be resolved after the whole sheet is read instead of keeping whichever came first.
+    candidates: dict[tuple[str, str], list[tuple[MappedValue, str]]] = {}
     for idx, c in rows:
         if c.locator["row"] <= (header_row or 0):
             continue
@@ -151,7 +185,22 @@ def _map_sheet(sheet: str, rows: list[tuple[int, ParsedChunk]]) -> StatementMap 
             d = _to_decimal(cell_raw)
             if d is None:
                 continue
-            if key in smap.lines[period] and smap.lines[period][key].confidence >= conf:
-                continue
-            smap.lines[period][key] = MappedValue(d, str(raw), cell, sheet, c.locator["row"], idx, conf)
+            mv = MappedValue(d * scale, str(raw), cell, sheet, c.locator["row"], idx, conf)
+            candidates.setdefault((period, key), []).append((mv, label.strip()))
+    for (period, key), found_rows in candidates.items():
+        exact = [mv for mv, _ in found_rows if mv.confidence >= 1.0]
+        if exact:
+            smap.lines[period][key] = exact[0]
+            continue
+        if len(found_rows) == 1:
+            smap.lines[period][key] = found_rows[0][0]
+            continue
+        # Several partial matches and no total row: the line is the sum of its components, flagged for review.
+        first = found_rows[0][0]
+        total = sum((mv.value for mv, _ in found_rows), Decimal(0))
+        labels = [lbl for _, lbl in found_rows]
+        smap.lines[period][key] = MappedValue(
+            total, " + ".join(mv.raw for mv, _ in found_rows), first.cell, sheet, first.row, first.chunk_index, 0.6
+        )
+        smap.ambiguous.setdefault(key, labels)
     return smap

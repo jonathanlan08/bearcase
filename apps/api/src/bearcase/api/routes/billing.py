@@ -135,6 +135,20 @@ def _purchase_out(p: Purchase) -> dict[str, Any]:
     }
 
 
+def _offer(s: Settings) -> dict[str, Any]:
+    return {
+        "configured": bool(s.stripe_secret_key),
+        "pilot": {"amount_cents": s.pilot_price_cents, "currency": s.pilot_currency, "description": PILOT_DESCRIPTION},
+    }
+
+
+@router.get("/offer")
+def billing_offer() -> dict[str, Any]:
+    """The public offer: price, currency, and whether checkout is enabled. No session needed, so a visitor who
+    is not signed in still sees what a pilot costs; purchase history stays behind /status."""
+    return _offer(get_settings())
+
+
 @router.get("/status")
 def billing_status(db: DbDep, user: UserDep) -> dict[str, Any]:
     s = get_settings()

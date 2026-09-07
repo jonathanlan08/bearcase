@@ -26,7 +26,7 @@ export function SiteNav() {
         <nav aria-label="Site" className="hidden items-center gap-7 text-sm md:flex">
           <Link href="/methodology" className="text-fg-muted hover:text-fg">Methodology</Link>
           <Link href="/trust" className="text-fg-muted hover:text-fg">Trust &amp; data</Link>
-          <Link href="/app" className="text-fg-muted hover:text-fg">Open your workspace</Link>
+          <Link href="/app" className="text-fg-muted hover:text-fg">Sign in</Link>
           <Link href="/demo" className={buttonClass("primary", "sm")}>Explore the demo</Link>
         </nav>
         <div className="flex items-center gap-2 md:hidden">
@@ -39,7 +39,7 @@ export function SiteNav() {
           <ul className="flex flex-col gap-3 text-base">
             <li><Link href="/methodology" onClick={() => setOpen(false)}>Methodology</Link></li>
             <li><Link href="/trust" onClick={() => setOpen(false)}>Trust &amp; data</Link></li>
-            <li><Link href="/app" onClick={() => setOpen(false)}>Open your workspace</Link></li>
+            <li><Link href="/app" onClick={() => setOpen(false)}>Sign in</Link></li>
             <li><Link href="/demo" onClick={() => setOpen(false)}>Explore the demo</Link></li>
           </ul>
         </nav>
@@ -60,7 +60,7 @@ export function SiteFooter() {
           <p className="text-sm font-semibold">Product</p>
           <ul className="mt-3 flex flex-col gap-2 text-sm">
             <li><Link href="/demo" className="hover:underline">Explore the demo</Link></li>
-            <li><Link href="/app" className="hover:underline">Open your workspace</Link></li>
+            <li><Link href="/app" className="hover:underline">Sign in</Link></li>
             <li><Link href="/methodology" className="hover:underline">Methodology</Link></li>
             <li><Link href="/trust" className="hover:underline">How we handle your documents</Link></li>
             <li><a href={GITHUB} className="hover:underline" target="_blank" rel="noreferrer">View on GitHub</a></li>

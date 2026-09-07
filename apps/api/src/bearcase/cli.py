@@ -84,7 +84,20 @@ def cmd_eval(args: argparse.Namespace) -> int:
         from bearcase.evals.run import review_agreement
 
         agreement = review_agreement(Path(args.reviews))
-        print(json.dumps(agreement, indent=2) if args.json else agreement["summary_text"])
+        if args.json:
+            print(json.dumps(agreement, indent=2))
+        else:
+            print(agreement["summary_text"])
+            print(
+                "Note: this scores the AI statuses stored in the file against the reviewer decisions stored beside"
+                " them. It describes past reviews; it does not run the current code. Use `bearcase eval` (fixtures)"
+                " for the release check."
+            )
+        minimum = getattr(args, "min_agreement", None)
+        rate = agreement.get("agreement_rate")
+        if minimum is not None and agreement.get("judged", 0) and rate is not None and rate * 100 < minimum:
+            print(f"Agreement {rate * 100:.1f}% is below the required {minimum}%.")
+            return 1
         return 0
     from bearcase.evals.run import run_evals
 
@@ -388,6 +401,7 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FILE.jsonl",
         help="Instead of the suite, score AI status against reviewer decisions in a file from `bearcase export-reviews`",
     )
+    e.add_argument("--min-agreement", type=float, metavar="PCT", help="With --reviews: exit 1 when agreement is below this percentage")
     e.set_defaults(fn=cmd_eval)
     x = sub.add_parser("export-reviews", help="Write reviewed claims (AI assessment, reviewer decision, evidence) as JSON lines")
     x.add_argument("--deal", help="Deal id; every deal when omitted")

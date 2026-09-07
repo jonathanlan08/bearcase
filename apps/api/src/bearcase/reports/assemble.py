@@ -49,7 +49,7 @@ SECTION_TITLES = {
     "deal_overview": "Deal overview",
     "executive_summary": "Executive summary",
     "documents_reviewed": "Documents reviewed",
-    "verified_financials": "Verified financials",
+    "verified_financials": "Checked financials",
     "claim_table": "Claim ledger",
     "contradictions": "Contradictions",
     "unsupported_assumptions": "Unsupported assumptions",

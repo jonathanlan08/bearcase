@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -13,6 +13,16 @@ from pydantic_core import PydanticCustomError
 
 class Out(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("*", mode="after")
+    @classmethod
+    def _utc(cls, v: Any) -> Any:
+        """Rows are stored in UTC; SQLite hands them back naive. Serialise them with an offset so a browser
+        does not read a UTC time as local (the audit trail and the chat thread must agree on when a reply
+        happened)."""
+        if isinstance(v, datetime) and v.tzinfo is None:
+            return v.replace(tzinfo=UTC)
+        return v
 
 
 class UserOut(Out):

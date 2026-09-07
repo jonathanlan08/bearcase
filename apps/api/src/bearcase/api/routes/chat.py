@@ -61,7 +61,12 @@ def chat_budget(db: Session, user_id: uuid.UUID, limit: int) -> dict:
         db.scalar(
             select(func.count(ChatMessage.id))
             .join(ChatThread, ChatThread.id == ChatMessage.thread_id)
-            .where(ChatThread.user_id == user_id, ChatMessage.role == "assistant", ChatMessage.created_at >= start)
+            .where(
+                ChatThread.user_id == user_id,
+                ChatMessage.role == "assistant",
+                ChatMessage.created_at >= start,
+                ChatMessage.error.is_(None),  # a failed or stopped reply is not an answer
+            )
         )
         or 0
     )

@@ -151,7 +151,8 @@ export interface ChatBudget { limit: number; used: number; resets_on: string }
 export type PurchaseStatus = "pending" | "paid" | "failed";
 export interface Purchase { id: string; kind: string; amount_cents: number; currency: string; status: PurchaseStatus; deal_id: string | null; created_at: string; paid_at: string | null }
 /** `configured` is false when the API has no Stripe keys; the page then offers a mailto instead of checkout. */
-export interface BillingStatus { configured: boolean; pilot: { amount_cents: number; currency: string; description: string }; purchases: Purchase[] }
+export interface BillingOffer { configured: boolean; pilot: { amount_cents: number; currency: string; description: string } }
+export interface BillingStatus extends BillingOffer { purchases: Purchase[] }
 
 export const auth = {
   verify: (token: string) => api.post<{ verified: boolean }>("/api/auth/verify", { token }),
@@ -168,6 +169,9 @@ export const members = {
 };
 
 export const billing = {
+  /** Public: price and whether checkout is enabled. No session needed. */
+  offer: () => api.get<BillingOffer>("/api/billing/offer"),
+  /** Signed in: the offer plus this account's purchases. */
   status: () => api.get<BillingStatus>("/api/billing/status"),
   checkout: (dealId?: string) => api.post<{ url: string }>("/api/billing/checkout", dealId ? { deal_id: dealId } : {}),
 };

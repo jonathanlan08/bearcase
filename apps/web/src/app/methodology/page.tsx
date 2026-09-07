@@ -9,7 +9,7 @@ const FORMULAS: Array<[string, string, string]> = [
   ["Gross margin", "(revenue − COGS) / revenue", "None if revenue is zero"],
   ["Operating margin", "operating income / revenue", "None if revenue is zero"],
   ["Reported EBITDA", "net income + interest + tax + depreciation + amortization", "Stated EBITDA line is cross-checked; a mismatch flags review"],
-  ["Verified adjusted EBITDA", "reported EBITDA + accepted add-backs − accepted downward adjustments", "Rejected and unsupported items stay visible but excluded"],
+  ["Checked adjusted EBITDA", "reported EBITDA + accepted add-backs − accepted downward adjustments", "Rejected and unsupported items stay visible but excluded; acceptances are rule-based until a reviewer records a decision"],
   ["Enterprise value", "purchase price, or equity price + debt assumed − cash acquired", "Basis is an explicit deal input"],
   ["EV / EBITDA, Debt / EBITDA", "enterprise value ÷ EBITDA, funded debt ÷ EBITDA", "None if EBITDA is zero; negative EBITDA is noted"],
   ["Annual debt service", "P·r / (1 − (1+r)^−n) × payments per year", "Zero-rate loans amortize straight-line; balloon structures are out of scope"],

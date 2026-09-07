@@ -40,6 +40,9 @@ export const useAudit = (id: string) => useQuery({ queryKey: qk.audit(id), query
 export const useEvidence = (id: string, eid: string | null) => useQuery({ queryKey: qk.evidence(id, eid ?? ""), queryFn: () => api.get<Evidence>(`/api/deals/${id}/evidence/${eid}`), enabled: !!eid });
 export const useDocEvidence = (id: string, did: string | null) => useQuery({ queryKey: qk.docEvidence(id, did ?? ""), queryFn: () => api.get<Evidence[]>(`/api/deals/${id}/documents/${did}/evidence?limit=2000`), enabled: !!did });
 
+/** The viewer reports that a person opened this evidence; reading a row for a chip label is not an open. */
+export const reportEvidenceOpened = (id: string, eid: string) => api.post<unknown>(`/api/deals/${id}/evidence/${eid}/opened`).catch(() => undefined);
+
 export function useInvalidateDeal(id: string) {
   const qc = useQueryClient();
   return () => qc.invalidateQueries({ predicate: (q) => Array.isArray(q.queryKey) && q.queryKey.includes(id) });

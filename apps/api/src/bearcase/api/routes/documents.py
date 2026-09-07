@@ -284,8 +284,18 @@ def get_evidence(deal: DealDep, evidence_id: uuid.UUID, db: DbDep, user: UserDep
         raise HTTPException(404, "Evidence not found.")
     eo = EvidenceOut.model_validate(e)
     eo.document_name, eo.doc_type = e.document.display_name, e.document.doc_type.value
-    _record_evidence_opened(db, deal, user, e)
     return eo
+
+
+@router.post("/deals/{deal_id}/evidence/{evidence_id}/opened", status_code=204)
+def evidence_opened(deal: DealDep, evidence_id: uuid.UUID, db: DbDep, user: UserDep) -> Response:
+    """The document viewer reports that a person opened this evidence. Reading the row (GET) is not an open:
+    citation chips fetch rows to render their labels, and that must not count as inspecting the source."""
+    e = db.scalar(select(Evidence).where(Evidence.id == evidence_id, Evidence.deal_id == deal.id))
+    if e is None:
+        raise HTTPException(404, "Evidence not found.")
+    _record_evidence_opened(db, deal, user, e)
+    return Response(status_code=204)
 
 
 @router.delete("/deals/{deal_id}/documents/{document_id}", status_code=204)

@@ -38,7 +38,7 @@ def _waterfall(reported: Decimal | None, adjustments: list[Adjustment]) -> list[
             )
         )
     steps.append(
-        WaterfallStep(label="Verified adjusted EBITDA", amount=total, decision="verified", included=True, running_total=total)
+        WaterfallStep(label="Checked adjusted EBITDA", amount=total, decision="verified", included=True, running_total=total)
     )
     return steps
 
