@@ -10,21 +10,48 @@ export class ApiError extends Error {
   }
 }
 
+/** The API's error body is `{detail}`; anything else (a proxy's HTML page, plain text) is kept as the detail itself. */
+function parseBody(text: string): unknown {
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return text;
+  }
+}
+
+async function fail(res: Response): Promise<never> {
+  const body = parseBody(await res.text());
+  const detail = body && typeof body === "object" && "detail" in body ? (body as { detail: unknown }).detail : body;
+  throw new ApiError(res.status, detail);
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(path, { credentials: "include", ...init, headers: { ...(init.body instanceof FormData ? {} : { "Content-Type": "application/json" }), ...(init.headers ?? {}) } });
+  if (!res.ok) return fail(res);
   if (res.status === 204) return undefined as T;
-  const text = await res.text();
-  let body: unknown = text;
-  try {
-    body = text ? JSON.parse(text) : null;
-  } catch {
-    /* keep text */
-  }
-  if (!res.ok) {
-    const detail = body && typeof body === "object" && "detail" in body ? (body as { detail: unknown }).detail : body;
-    throw new ApiError(res.status, detail);
-  }
-  return body as T;
+  return parseBody(await res.text()) as T;
+}
+
+/** A 204 reply's headers, for routes that answer with advice in a header (document deletion says whether to re-run analysis). */
+async function requestHeaders(path: string, init: RequestInit): Promise<Headers> {
+  const res = await fetch(path, { credentials: "include", ...init });
+  if (!res.ok) return fail(res);
+  return res.headers;
+}
+
+/** File name from a Content-Disposition header; the fallback is used when the server sent none. */
+export function attachmentName(disposition: string | null, fallback: string): string {
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(disposition ?? "");
+  if (utf8) { try { return decodeURIComponent(utf8[1]); } catch { /* fall through */ } }
+  const plain = /filename="?([^";]+)"?/i.exec(disposition ?? "");
+  return plain?.[1]?.trim() || fallback;
+}
+
+/** Fetch an export as a file: the blob plus the name the server gave it. The caller hands it to the browser's save. */
+async function download(path: string, fallbackName: string): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch(path, { credentials: "include" });
+  if (!res.ok) return fail(res);
+  return { blob: await res.blob(), filename: attachmentName(res.headers.get("Content-Disposition"), fallbackName) };
 }
 
 export const api = {
@@ -32,6 +59,8 @@ export const api = {
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }),
   put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
   upload: <T>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form }),
+  del: (path: string) => requestHeaders(path, { method: "DELETE" }),
+  download,
 };
 
 /* ---------- API types (mirror apps/api/src/bearcase/api/schemas.py) ---------- */
@@ -86,3 +115,24 @@ export interface Report { id: string; deal_id: string; version_no: number; statu
 export interface AuditEvent { id: string; event_type: string; object_type: string; object_id: string | null; summary: string; payload: Record<string, unknown>; user_name: string; created_at: string }
 export interface DealSummary { deal: Deal; documents: Record<string, number>; claim_counts: Record<string, number>; findings_by_severity: Record<string, number>; seller_adjusted_ebitda: string | null; verified_adjusted_ebitda: string | null; reported_ebitda: string | null; dscr_by_scenario: Array<{ scenario_id: string; name: string; kind: string; dscr: string | null; warnings: string[] }>; covenant_threshold: string | null; missing_documents: Finding[]; top_findings: Finding[]; latest_report: { id: string; version_no: number; status: string; outcome: string; created_at: string } | null; active_jobs: number; mode: { provider: string; model: string } }
 export interface Health { status: string; version: string; engine_version: string; provider: string; model: string; database: string; storage: string }
+
+/* ---------- Buyer workflow: questions for the seller, progress, usage (see the routes in apps/api) ---------- */
+
+/** Where a question came from. Mirrors the API's seller-question kinds, which collapse the finding kinds to plain groups. */
+export type SellerQuestionKind = "contradiction" | "unsupported" | "missing_document" | "covenant" | "concentration" | "risk" | "integrity";
+export interface SellerQuestion { id: string; question: string; why: string; kind: SellerQuestionKind | string; severity: string; evidence_ids: string[]; metric_ids: string[]; claim_id: string | null; finding_id: string | null; document_names: string[] }
+/** Deterministic: the same function assembles the report's "Management questions" section, so the page and the report agree. */
+export interface SellerQuestions { questions: SellerQuestion[]; generated_from: { findings: number; claims: number } }
+
+export type ProgressKey = "documents" | "findings" | "evidence" | "questions";
+export interface ProgressStep { key: ProgressKey; label: string; done: boolean; href_key: string }
+export interface Progress { steps: ProgressStep[] }
+
+export interface Usage {
+  chat: { messages: number; input_tokens: number; output_tokens: number; tool_calls: number; by_model: Record<string, number> };
+  documents: { count: number; bytes: number; pages: number; rows: number };
+  storage_bytes: number;
+  /** Null when a model has no entry in the price table; `pricing_note` says so. */
+  cost_estimate_usd: number | null;
+  pricing_note: string;
+}

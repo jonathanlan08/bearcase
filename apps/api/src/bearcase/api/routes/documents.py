@@ -1,21 +1,45 @@
 from __future__ import annotations
 
+import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile
-from sqlalchemy import func, select
+from fastapi import APIRouter, HTTPException, Query, Response, UploadFile
+from sqlalchemy import delete, func, select, update
 
 from bearcase.api.deps import DbDep, DealDep, UserDep
 from bearcase.api.schemas import DocumentOut, EvidenceOut, JobOut, ProcessResponse, VersionOut
 from bearcase.audit import record
+from bearcase.chat.brief import invalidate_brief
 from bearcase.config import get_settings
 from bearcase.ingest.storage import get_storage, make_object_key
 from bearcase.ingest.validation import UploadRejected, validate_upload
-from bearcase.models import Deal, Document, DocumentVersion, Evidence, ProcessingJob
+from bearcase.models import (
+    Adjustment,
+    AuditEvent,
+    Claim,
+    ClaimEvidenceLink,
+    Deal,
+    Document,
+    DocumentVersion,
+    Evidence,
+    ExtractionRun,
+    FinancialPeriod,
+    Finding,
+    ProcessingJob,
+    ReportCitation,
+    ReviewDecision,
+    ReviewerComment,
+    User,
+)
+from bearcase.models.base import utcnow
 from bearcase.models.enums import DocumentStatus, JobType
 from bearcase.pipeline.jobs import dispatch, enqueue_job
 
+log = logging.getLogger("bearcase.documents")
 router = APIRouter(tags=["documents"])
+# Sent with a 204 from the delete route: findings and metrics were computed with the document present and
+# may now be stale, so the UI should offer "Run analysis".
+REANALYSE_HEADER = "X-BearCase-Reanalyse"
 
 
 def doc_out(db, doc: Document) -> DocumentOut:  # type: ignore[no-untyped-def]
@@ -214,14 +238,120 @@ def reprocess_document(deal: DealDep, document_id: uuid.UUID, db: DbDep, user: U
     return ProcessResponse(job_ids=[job.id], message="Queued.")
 
 
+def _record_evidence_opened(db, deal: Deal, user: User, e: Evidence) -> None:  # type: ignore[no-untyped-def]
+    """One `evidence.opened` audit row per evidence, user, and UTC day: enough for the workflow progress steps
+    without turning the audit trail into a click log."""
+    day_start = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    seen = db.scalar(
+        select(AuditEvent.id)
+        .where(
+            AuditEvent.event_type == "evidence.opened",
+            AuditEvent.object_id == e.id,
+            AuditEvent.user_id == user.id,
+            AuditEvent.created_at >= day_start,
+        )
+        .limit(1)
+    )
+    if seen is not None:
+        return
+    loc = e.locator or {}
+    where = ", ".join(
+        part
+        for part in (
+            f"sheet {loc['sheet']}" if loc.get("sheet") else "",
+            f"page {loc['page']}" if loc.get("page") else "",
+            f"row {loc['row']}" if loc.get("row") is not None else "",
+        )
+        if part
+    )
+    record(
+        db,
+        deal_id=deal.id,
+        user_id=user.id,
+        event_type="evidence.opened",
+        object_type="evidence",
+        object_id=e.id,
+        summary=f"Opened evidence in {e.document.display_name}" + (f" ({where})" if where else ""),
+        payload={"document_id": str(e.document_id), "locator": loc},
+    )
+    db.commit()
+
+
 @router.get("/deals/{deal_id}/evidence/{evidence_id}", response_model=EvidenceOut)
-def get_evidence(deal: DealDep, evidence_id: uuid.UUID, db: DbDep) -> EvidenceOut:
+def get_evidence(deal: DealDep, evidence_id: uuid.UUID, db: DbDep, user: UserDep) -> EvidenceOut:
     e = db.scalar(select(Evidence).where(Evidence.id == evidence_id, Evidence.deal_id == deal.id))
     if e is None:
         raise HTTPException(404, "Evidence not found.")
     eo = EvidenceOut.model_validate(e)
     eo.document_name, eo.doc_type = e.document.display_name, e.document.doc_type.value
+    _record_evidence_opened(db, deal, user, e)
     return eo
+
+
+@router.delete("/deals/{deal_id}/documents/{document_id}", status_code=204)
+def delete_document(deal: DealDep, document_id: uuid.UUID, db: DbDep, user: UserDep) -> Response:
+    """Remove a document with everything derived from it: its versions and stored files, its evidence, the
+    claims extracted from it (with their links, reviewer decisions, and findings), and the findings that cite
+    its evidence. Children are deleted explicitly, in dependency order, so the result does not depend on the
+    database enforcing ON DELETE. The response carries X-BearCase-Reanalyse: true because the remaining
+    findings and metrics were computed with the document present."""
+    doc = db.scalar(select(Document).where(Document.id == document_id, Document.deal_id == deal.id))
+    if doc is None:
+        raise HTTPException(404, "Document not found.")
+    keys = [v.storage_key for v in doc.versions]
+    claim_ids = set(db.scalars(select(Claim.id).where(Claim.document_id == doc.id)).all())
+    evidence_ids = {str(e) for e in db.scalars(select(Evidence.id).where(Evidence.document_id == doc.id)).all()}
+    doc_claims = select(Claim.id).where(Claim.document_id == doc.id)
+    doc_evidence = select(Evidence.id).where(Evidence.document_id == doc.id)
+
+    findings_removed = 0
+    for f in db.scalars(select(Finding).where(Finding.deal_id == deal.id)):
+        if f.claim_id in claim_ids or any(str(e) in evidence_ids for e in f.evidence_ids):
+            db.delete(f)
+            findings_removed += 1
+    db.flush()
+    db.execute(delete(ReviewDecision).where(ReviewDecision.claim_id.in_(doc_claims)))
+    db.execute(delete(ReviewerComment).where(ReviewerComment.claim_id.in_(doc_claims)))
+    db.execute(update(Adjustment).where(Adjustment.claim_id.in_(doc_claims)).values(claim_id=None))
+    db.execute(delete(ClaimEvidenceLink).where(ClaimEvidenceLink.claim_id.in_(doc_claims)))
+    db.execute(delete(Claim).where(Claim.document_id == doc.id))
+    # Evidence: links from other documents' claims that cited this evidence go too; citations in stored
+    # reports keep their row and lose the pointer, the way the database would set them null.
+    db.execute(delete(ClaimEvidenceLink).where(ClaimEvidenceLink.evidence_id.in_(doc_evidence)))
+    db.execute(update(Claim).where(Claim.source_evidence_id.in_(doc_evidence)).values(source_evidence_id=None))
+    db.execute(update(ReportCitation).where(ReportCitation.evidence_id.in_(doc_evidence)).values(evidence_id=None))
+    db.execute(delete(Evidence).where(Evidence.document_id == doc.id))
+    db.execute(update(FinancialPeriod).where(FinancialPeriod.source_document_id == doc.id).values(source_document_id=None))
+    db.execute(delete(ExtractionRun).where(ExtractionRun.document_id == doc.id))
+    db.execute(delete(ProcessingJob).where(ProcessingJob.document_id == doc.id))
+    db.delete(doc)  # versions go through the relationship cascade
+    db.flush()
+    storage = get_storage()
+    for key in keys:
+        try:
+            storage.delete(key)
+        except Exception:  # a missing blob must not keep the rows alive
+            log.warning("could not delete stored file %s", key, exc_info=True)
+    record(
+        db,
+        deal_id=deal.id,
+        user_id=user.id,
+        event_type="document.deleted",
+        object_type="document",
+        object_id=doc.id,
+        summary=f"Deleted {doc.display_name} with {len(claim_ids)} claim{'s' if len(claim_ids) != 1 else ''} drawn from it",
+        payload={
+            "display_name": doc.display_name,
+            "doc_type": doc.doc_type.value,
+            "versions": len(keys),
+            "claims_removed": len(claim_ids),
+            "evidence_removed": len(evidence_ids),
+            "findings_removed": findings_removed,
+        },
+    )
+    db.commit()
+    invalidate_brief(deal.id)
+    return Response(status_code=204, headers={REANALYSE_HEADER: "true"})
 
 
 @router.get("/deals/{deal_id}/jobs", response_model=list[JobOut])

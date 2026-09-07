@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test.describe("BearCase smoke", () => {
   test("landing page explains the workflow and links to the demo", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("Stress-test every claim");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Check the seller's numbers");
     await expect(page.getByRole("link", { name: /Explore the demo/i }).first()).toBeVisible();
     await expect(page.getByText(/fictional/i).first()).toBeVisible();
   });

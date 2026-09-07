@@ -3,10 +3,11 @@
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useAudit } from "@/components/app/hooks";
+import { useUsage } from "@/components/app/workflow-hooks";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
-import { ErrorState, Skeleton, EmptyState } from "@/components/ui/primitives";
+import { ErrorState, Panel, Skeleton, EmptyState } from "@/components/ui/primitives";
 import { Table, td, th } from "@/components/ui/table";
-import { fmtDateTime, localZoneName, titleCase } from "@/lib/format";
+import { fmtBytes, fmtDateTime, fmtInt, localZoneName, titleCase } from "@/lib/format";
 
 /** Sentences for the API's event codes (see `record(...)` call sites in apps/api). Unknown codes fall back to the code in words. */
 const EVENT_TEXT: Record<string, string> = {
@@ -18,6 +19,10 @@ const EVENT_TEXT: Record<string, string> = {
   "document.uploaded": "Document uploaded",
   "document.rejected": "Upload rejected",
   "document.reprocess_requested": "Document read again",
+  "document.deleted": "Document deleted",
+  "evidence.opened": "Evidence opened",
+  "seller_questions.exported": "Questions for the seller exported",
+  "review_dataset.exported": "Review dataset exported",
   "claim.accept": "Assessment confirmed",
   "claim.reject": "Finding rejected",
   "claim.correct": "Claim corrected",
@@ -31,10 +36,39 @@ const EVENT_TEXT: Record<string, string> = {
   "chat.reply": "Chat reply recorded",
   "user.registered": "Account registered",
 };
-const GROUP_LABEL: Record<string, string> = { deal: "Deal", document: "Documents", claim: "Claim reviews", adjustment: "Add-back decisions", scenario: "Scenarios", report: "Reports", chat: "Chat", user: "Account" };
+const GROUP_LABEL: Record<string, string> = { deal: "Deal", document: "Documents", evidence: "Evidence", claim: "Claim reviews", adjustment: "Add-back decisions", scenario: "Scenarios", report: "Reports", seller_questions: "Questions for the seller", review_dataset: "Review dataset", chat: "Chat", user: "Account" };
 
 function eventText(eventType: string): string {
   return EVENT_TEXT[eventType] ?? titleCase(eventType.replace(".", " "));
+}
+
+const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 4 });
+
+/** What the deal has used: the assistant's messages and tokens, the documents read, the storage held, and a cost estimate from a fixed price table. */
+function UsagePanel({ dealId }: { dealId: string }) {
+  const usage = useUsage(dealId);
+  const u = usage.data;
+  const models = u ? Object.entries(u.chat.by_model).sort((a, b) => b[1] - a[1]) : [];
+  return (
+    <Panel title="Usage" className="mb-4">
+      {usage.isPending && <Skeleton className="h-20" />}
+      {usage.isError && <p className="text-sm text-fg-muted">Usage could not be loaded for this deal.</p>}
+      {u && (
+        <>
+          <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+            <div><dt className="text-xs text-fg-muted">Assistant messages</dt><dd className="num mt-0.5 font-medium">{fmtInt(u.chat.messages)}</dd></div>
+            <div><dt className="text-xs text-fg-muted">Tokens in / out</dt><dd className="num mt-0.5 font-medium">{fmtInt(u.chat.input_tokens)} / {fmtInt(u.chat.output_tokens)}</dd></div>
+            <div><dt className="text-xs text-fg-muted">Tool calls</dt><dd className="num mt-0.5 font-medium">{fmtInt(u.chat.tool_calls)}</dd></div>
+            <div><dt className="text-xs text-fg-muted">Documents read</dt><dd className="mt-0.5 font-medium"><span className="num">{fmtInt(u.documents.count)}</span> <span className="text-xs font-normal text-fg-muted">(<span className="num">{fmtInt(u.documents.pages)}</span> pages, <span className="num">{fmtInt(u.documents.rows)}</span> rows, {fmtBytes(u.documents.bytes)})</span></dd></div>
+            <div><dt className="text-xs text-fg-muted">Storage held</dt><dd className="num mt-0.5 font-medium">{fmtBytes(u.storage_bytes)}</dd></div>
+            <div><dt className="text-xs text-fg-muted">Estimated model cost</dt><dd className="num mt-0.5 font-medium">{u.cost_estimate_usd === null ? "n/a" : usd.format(u.cost_estimate_usd)}</dd></div>
+          </dl>
+          {models.length > 0 && <p className="mt-3 text-xs text-fg-muted">By model: {models.map(([m, n]) => `${m} (${fmtInt(n)})`).join(", ")}.</p>}
+          <p className="mt-2 text-xs text-fg-muted">{u.pricing_note} The estimate uses a fixed price table, not the provider&apos;s invoice; storage and processing time are counted so you can see what one deal costs to run.</p>
+        </>
+      )}
+    </Panel>
+  );
 }
 
 export default function AuditPage() {
@@ -50,6 +84,7 @@ export default function AuditPage() {
         <p className="mt-2 max-w-3xl text-sm text-fg-muted">Every change to this deal, who made it, and when. Reviewer decisions never overwrite the AI’s original output; they are added here as separate entries.</p>
       </PageHeader>
       <div className="p-4 md:p-6">
+        <UsagePanel dealId={dealId} />
         {audit.isPending && <Skeleton className="h-64" />}
         {audit.isError && <ErrorState detail={String(audit.error)} onRetry={() => audit.refetch()} />}
         {audit.data && audit.data.length === 0 && <EmptyState title="No events yet" body="Uploads, analysis runs, reviewer decisions, scenario runs, and reports will appear here." />}

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useLocalFlag } from "@/lib/hooks";
-import { FolderOpen, ListChecks, Calculator, FlaskConical, FileText, LayoutDashboard, History, PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, MoreHorizontal } from "lucide-react";
+import { FolderOpen, ListChecks, Calculator, FlaskConical, FileText, MessageCircleQuestionMark, LayoutDashboard, History, PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, MoreHorizontal, ShieldCheck } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useDeal, useDeals, qk } from "@/components/app/hooks";
@@ -19,6 +19,7 @@ const PRIMARY = [
   { key: "financials", label: "Financial Verification", short: "Financials", n: "03", Icon: Calculator },
   { key: "scenarios", label: "Scenario Lab", short: "Scenarios", n: "04", Icon: FlaskConical },
   { key: "report", label: "Red-Team Report", short: "Report", n: "05", Icon: FileText },
+  { key: "questions", label: "Seller Questions", short: "Questions", n: "06", Icon: MessageCircleQuestionMark },
 ];
 const SECONDARY = [
   { key: "", label: "Overview", Icon: LayoutDashboard },
@@ -100,6 +101,7 @@ export function DealShell({ children }: { children: React.ReactNode }) {
             </div>
           )}
           {!collapsed && deal.data?.is_demo && <p className="text-[11px] leading-snug text-fg-muted">Northstar HVAC is fictional. Not financial, legal, tax, or investment advice.</p>}
+          <Link href="/trust" className="flex h-8 items-center gap-2 rounded-[var(--radius-1)] px-1 text-xs text-fg-muted hover:bg-bg-muted hover:text-fg" title={collapsed ? "Trust & data" : undefined} aria-label={collapsed ? "Trust & data" : undefined}><ShieldCheck size={14} />{!collapsed && "Trust & data"}</Link>
           <button type="button" onClick={logout} className="flex h-8 items-center gap-2 rounded-[var(--radius-1)] px-1 text-xs text-fg-muted hover:bg-bg-muted" title="Sign out" aria-label={collapsed ? "Sign out" : undefined}><LogOut size={14} />{!collapsed && (me.data?.display_name ?? "Sign out")}</button>
         </div>
       </aside>
@@ -117,6 +119,7 @@ export function DealShell({ children }: { children: React.ReactNode }) {
                 <DropdownMenu.Separator className="my-1 h-px bg-hairline" />
                 <DropdownMenu.Item asChild><Link href="/app/deals/new" className={MENU_ITEM}>Create a deal…</Link></DropdownMenu.Item>
                 <DropdownMenu.Item asChild><Link href="/app" className={MENU_ITEM}>All deals</Link></DropdownMenu.Item>
+                <DropdownMenu.Item asChild><Link href="/trust" className={MENU_ITEM}>Trust &amp; data</Link></DropdownMenu.Item>
                 <DropdownMenu.Item asChild><button type="button" onClick={logout} className={`${MENU_ITEM} w-full text-left`}>Sign out{me.data?.display_name ? ` (${me.data.display_name})` : ""}</button></DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
@@ -124,7 +127,7 @@ export function DealShell({ children }: { children: React.ReactNode }) {
         </header>
         <main id="main" className={`flex-1 ${MAIN_PAD}`}>{children}</main>
         <div className={CHAT_TRIGGER_OFFSET}><DealChat dealId={dealId} /></div>
-        <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-hairline bg-bg-raised pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Primary">
+        <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-6 border-t border-hairline bg-bg-raised pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Primary">
           {PRIMARY.map(({ key, label, short, Icon }) => (
             <Link key={key} href={`${base}/${key}`} aria-current={isActive(key) ? "page" : undefined} aria-label={label} className={`flex h-14 flex-col items-center justify-center gap-1 text-[10px] ${isActive(key) ? "text-fg font-medium" : "text-fg-muted"}`}>
               <Icon size={18} /><span className="truncate px-1">{short}</span>

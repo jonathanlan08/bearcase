@@ -127,10 +127,10 @@ export function Hero() {
           <div className="flex flex-1 flex-col justify-end lg:justify-center">
             <div ref={copyRef} className="pointer-events-auto max-w-[600px]">
               <motion.h1 {...enter(0.05)} className="text-[40px] leading-[1.02] tracking-[-0.035em] md:text-[64px] lg:text-[76px]">
-                Stress-test every claim before capital moves.
+                Check the seller&apos;s numbers before you buy the business.
               </motion.h1>
               <motion.p {...enter(0.18)} className="mt-6 max-w-[480px] text-[17px] leading-relaxed text-fg-muted md:text-lg">
-                Buying a business? Check whether the seller&apos;s story matches the documents: overstated earnings, missing evidence, and what happens when the numbers get worse.
+                BearCase checks a seller&apos;s documents for financial inconsistencies and shows you what to investigate before buying the business.
               </motion.p>
               <motion.div {...enter(0.3)} className="mt-8 flex flex-wrap gap-3">
                 <Link href="/demo" className={buttonClass("primary", "md", "h-11 px-5")}>Explore the demo</Link>

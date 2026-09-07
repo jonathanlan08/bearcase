@@ -242,3 +242,57 @@ def run_evals() -> dict[str, Any]:
     for c in checks:
         lines.append(f"  [{'ok' if c['passed'] else 'FAIL'}] {c['name']}: {c['detail']}")
     return {"passed": passed, "provider": get_provider().name, "checks": checks, "summary_text": "\n".join(lines)}
+
+
+def review_agreement(path: Path) -> dict[str, Any]:
+    """Score the AI status against reviewer decisions in a review dataset (`bearcase export-reviews`).
+
+    A row counts as judged when the reviewer left a current decision with a resulting status (an undone
+    decision has none). Agreement is ai_status == reviewer_status, overall and per claim type; corrections are
+    rows whose reviewer action was "correct". This is the release measure the product grows on: a larger,
+    expert-reviewed dataset makes the number mean more, and it is computed from the file alone, so it can be
+    run on a dataset from any deployment without a database or a model."""
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    judged = [r for r in rows if r.get("reviewer_status")]
+    agreed = sum(1 for r in judged if r.get("ai_status") == r.get("reviewer_status"))
+    by_type: dict[str, dict[str, int]] = {}
+    for r in judged:
+        t = by_type.setdefault(str(r.get("claim_type") or "unknown"), {"judged": 0, "agreed": 0})
+        t["judged"] += 1
+        t["agreed"] += int(r.get("ai_status") == r.get("reviewer_status"))
+    corrections = sum(1 for r in rows if r.get("reviewer_action") == "correct")
+    disagreements = [
+        {
+            "claim_id": r.get("claim_id"),
+            "claim_type": r.get("claim_type"),
+            "ai_status": r.get("ai_status"),
+            "reviewer_status": r.get("reviewer_status"),
+            "reviewer_note": r.get("reviewer_note"),
+        }
+        for r in judged
+        if r.get("ai_status") != r.get("reviewer_status")
+    ]
+    rate = agreed / len(judged) if judged else None
+    lines = [f"Reviewer agreement over {len(rows)} reviewed claim{'s' if len(rows) != 1 else ''} in {path.name}"]
+    if rate is not None:
+        lines.append(f"  overall: {agreed}/{len(judged)} ({rate:.0%}) AI statuses match the reviewer's")
+        for name in sorted(by_type):
+            t = by_type[name]
+            lines.append(f"  {name}: {t['agreed']}/{t['judged']} ({t['agreed'] / t['judged']:.0%})")
+    else:
+        lines.append("  overall: no judged rows (every decision was undone), nothing to score")
+    lines.append(f"  corrections: {corrections} claim{'s' if corrections != 1 else ''} corrected by a reviewer")
+    for d in disagreements:
+        lines.append(
+            f"  disagreement: {d['claim_type']} AI {d['ai_status']} vs reviewer {d['reviewer_status']}: {d['reviewer_note'] or ''}"
+        )
+    return {
+        "rows": len(rows),
+        "judged": len(judged),
+        "agreed": agreed,
+        "agreement_rate": rate,
+        "by_claim_type": by_type,
+        "corrections": corrections,
+        "disagreements": disagreements,
+        "summary_text": "\n".join(lines),
+    }

@@ -2,16 +2,75 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useSummary, useProcessDeal } from "@/components/app/hooks";
+import { useClaims, useSummary, useProcessDeal } from "@/components/app/hooks";
+import { useProgress } from "@/components/app/workflow-hooks";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
 import { Button, buttonClass } from "@/components/ui/button";
 import { ErrorState, Panel, Skeleton } from "@/components/ui/primitives";
 import { SeverityChip, StatusGlyph, STATUS_LABEL } from "@/components/domain/status";
 import { fmtMoney, fmtX, fmtDate, titleCase } from "@/lib/format";
 import { useToast } from "@/components/ui/toast";
-import type { Finding } from "@/lib/api";
+import { askTheDeal } from "@/lib/chat-bus";
+import type { Finding, ProgressKey } from "@/lib/api";
 
 const ORDER = ["supported", "contradicted", "review_required", "unsupported"] as const;
+
+/** The buyer's workflow, in the words the landing page uses. Done states come from `/progress`; the page only chooses the links. */
+const WORKFLOW: ReadonlyArray<{ key: ProgressKey; title: string; hint: string }> = [
+  { key: "documents", title: "Add documents", hint: "Upload what the seller gave you, then run analysis." },
+  { key: "findings", title: "Check the findings", hint: "Open a claim the documents disagree with and record what you decide." },
+  { key: "evidence", title: "Inspect the evidence", hint: "Open the cited page or cell and read it yourself." },
+  { key: "questions", title: "Send questions to the seller", hint: "Copy or download the questions, each with its evidence attached." },
+];
+
+/** Chat hand-offs for a finding: "Explain" prefills so the user can add what they want to know; "Draft a question" sends at once. */
+const explainFinding = (title: string) => askTheDeal(`Explain this finding: ${title}`);
+const draftQuestion = (title: string) => askTheDeal(`Draft a question for the seller about: ${title}. Cite the evidence ids.`, { send: true });
+const ACTION = "text-[11px] text-fg-muted underline-offset-2 hover:text-fg hover:underline";
+
+function FindingActions({ title }: { title: string }) {
+  return (
+    <span className="mt-1 flex flex-wrap gap-x-3" role="group" aria-label={`Assistant actions for ${title}`}>
+      <button type="button" className={ACTION} onClick={() => explainFinding(title)}>Explain</button>
+      <button type="button" className={ACTION} onClick={() => draftQuestion(title)}>Draft a question</button>
+    </span>
+  );
+}
+
+/**
+ * The four steps as a strip of links. Each step carries a glyph, a word ("Done", "Next", "To do"), and its title, so the
+ * state is never colour alone; the first unfinished step is the current one.
+ */
+function WorkflowStrip({ steps }: { steps: Array<{ key: ProgressKey; title: string; hint: string; href: string; done: boolean }> }) {
+  const next = steps.find((s) => !s.done)?.key ?? null;
+  const done = steps.filter((s) => s.done).length;
+  return (
+    <section aria-labelledby="workflow-heading" className="rounded-[var(--radius-3)] border border-hairline bg-bg-raised">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-hairline px-4 py-3">
+        <h2 id="workflow-heading" className="text-sm font-medium">Your review, step by step</h2>
+        <p className="text-xs text-fg-muted"><span className="num">{done}</span> of <span className="num">{steps.length}</span> done</p>
+      </div>
+      <ol className="grid divide-y divide-hairline md:grid-cols-4 md:divide-x md:divide-y-0">
+        {steps.map((s, i) => {
+          const current = s.key === next;
+          const state = s.done ? "Done" : current ? "Next" : "To do";
+          return (
+            <li key={s.key}>
+              <Link href={s.href} aria-current={current ? "step" : undefined} className={`flex h-full flex-col gap-1.5 px-4 py-3 text-sm transition-colors duration-[120ms] hover:bg-bg-muted ${current ? "bg-bg-muted/60" : ""}`}>
+                <span className="flex items-center gap-2 text-xs">
+                  <StatusGlyph status={s.done ? "supported" : current ? "review_required" : "pending"} size={12} />
+                  <span className={s.done ? "text-fg-muted" : current ? "font-medium text-fg" : "text-fg-muted"}>{state}</span>
+                </span>
+                <span className={`flex items-baseline gap-2 ${current ? "font-medium" : ""}`}><span className="num text-xs text-fg-muted" aria-hidden>{i + 1}</span>{s.title}</span>
+                <span className="text-xs text-fg-muted">{s.hint}</span>
+              </Link>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
 const KIND_LABEL: Record<string, string> = { contradiction: "Contradiction", unsupported_assumption: "Unsupported", covenant_warning: "Loan coverage", concentration: "Concentration", risk: "Risk", document_integrity: "Document integrity", missing_document: "Missing document" };
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const KIND_PREFIX = /^(?:Contradicted|Unsupported|Missing|Risk):\s*/i;
@@ -59,8 +118,14 @@ export default function OverviewPage() {
   const s = useSummary(dealId);
   const kicker = useDealKicker();
   const process = useProcessDeal(dealId);
+  const progress = useProgress(dealId);
+  const claims = useClaims(dealId);
   const { toast } = useToast();
   const base = `/app/deals/${dealId}`;
+  // "Inspect the evidence" lands on the first claim the documents disagree with; with none, the plain claim list.
+  const firstContradicted = claims.data?.find((c) => c.effective_status === "contradicted")?.id ?? null;
+  const stepHref: Record<ProgressKey, string> = { documents: `${base}/documents`, findings: `${base}/claims`, evidence: firstContradicted ? `${base}/claims?claim=${firstContradicted}` : `${base}/claims`, questions: `${base}/questions` };
+  const steps = WORKFLOW.map((w) => ({ ...w, href: stepHref[w.key], done: progress.data?.steps.find((p) => p.key === w.key)?.done ?? false }));
   if (s.isPending) return <div className="p-6"><Skeleton className="h-8 w-64" /><Skeleton className="mt-6 h-36" /><div className="mt-4 grid gap-4 md:grid-cols-2"><Skeleton className="h-40" /><Skeleton className="h-40" /><Skeleton className="h-40" /><Skeleton className="h-40" /></div></div>;
   if (s.isError) return <div className="p-6"><ErrorState detail={String(s.error)} onRetry={() => s.refetch()} /></div>;
   const d = s.data;
@@ -120,6 +185,7 @@ export default function OverviewPage() {
             </dl>
           </details>
         </section>
+        <WorkflowStrip steps={steps} />
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <Panel title="Claims checked" actions={<Link href={`${base}/claims`} className="text-xs text-accent hover:underline">Open Claim Audit</Link>}>
             {total === 0 ? <p className="text-sm text-fg-muted">{noDocs ? "Add documents in the Deal Room to begin." : running ? "Analysis is running…" : "No claims yet. Run analysis to extract and check the claims."}</p> : (
@@ -178,6 +244,7 @@ export default function OverviewPage() {
                       <div className="min-w-0 flex-1">
                         <Link href={findingHref(base, f)} className="font-medium hover:underline">{title}</Link>
                         {detail && <p className="mt-0.5 line-clamp-2 text-fg-muted">{detail}</p>}
+                        <FindingActions title={title} />
                       </div>
                       <span className="shrink-0 text-[11px] text-fg-muted">{KIND_LABEL[f.kind] ?? titleCase(f.kind)}</span>
                     </li>
@@ -188,7 +255,7 @@ export default function OverviewPage() {
           </Panel>
           <Panel title="Missing information">
             {d.missing_documents.length === 0 ? <p className="text-sm text-fg-muted">Nothing outstanding.</p> : (
-              <ul className="flex flex-col gap-2 text-sm">{d.missing_documents.map((f) => { const title = findingTitle(f); const detail = findingDetail(f, title); return <li key={f.id} className="flex gap-2"><StatusGlyph status="review_required" className="mt-1" /><div><p className="font-medium">{title}</p>{detail && <p className="text-fg-muted">{detail}</p>}</div></li>; })}</ul>
+              <ul className="flex flex-col gap-2 text-sm">{d.missing_documents.map((f) => { const title = findingTitle(f); const detail = findingDetail(f, title); return <li key={f.id} className="flex gap-2"><StatusGlyph status="review_required" className="mt-1" /><div className="min-w-0"><p className="font-medium">{title}</p>{detail && <p className="text-fg-muted">{detail}</p>}<FindingActions title={title} /></div></li>; })}</ul>
             )}
           </Panel>
           <Panel title="Documents" actions={<Link href={`${base}/documents`} className="text-xs text-accent hover:underline">Open Deal Room</Link>}>

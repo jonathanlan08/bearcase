@@ -1,12 +1,14 @@
 # BearCase AI
 
-**Check the seller's story before you buy the business.**
+**BearCase checks a seller's documents for financial inconsistencies and shows you what to investigate before buying the business.**
 
 BearCase AI is an open-source prototype for reviewing a small-business acquisition. You add the seller's documents (the sales memo, financial statements, customer list, contracts, loan terms). BearCase pulls out the claims the seller makes, links each one to the page or spreadsheet cell it should rest on, recomputes the numbers in plain Python, tests what happens when things get worse, and writes a review in which every material statement points at its source.
 
-It is built for people buying one business at a time: acquisition entrepreneurs, search-fund buyers, small deal teams, and the analysts who help them.
+**Who it is for.** A person buying their first small business, working with an accountant or an adviser, who has received a sales memo and a few years of statements and has days to decide what to ask before paying for a quality-of-earnings review. Second, small acquisition teams (search funds, independent sponsors, a two- to five-person corporate development group) that want the first pass on every data room done the same way. It is not for lenders, sell-side brokers, or corporate M&A, and it is not a chatbot over PDFs. The first-customer plan is in [docs/go-to-market.md](docs/go-to-market.md).
 
-[Demo](#quick-start) · [First session](#what-you-can-answer-in-a-first-session) · [Deploy](#deploy) · [Methodology](docs/formulas/README.md) · [Architecture](docs/architecture.md) · [Design](docs/design/README.md) · [Security](SECURITY.md) · [Review response](docs/astra-review-response.md)
+The workflow is one path: upload documents, see the important discrepancies, inspect the evidence, export questions for the seller. The chat helps you finish that path ("Explain this finding", "Draft a question for the seller about this") rather than replacing it.
+
+[Demo](#quick-start) · [First session](#what-you-can-answer-in-a-first-session) · [Deploy](#deploy) · [Methodology](docs/formulas/README.md) · [Go-to-market](docs/go-to-market.md) · [Evaluation](docs/evaluation.md) · [Architecture](docs/architecture.md) · [Design](docs/design/README.md) · [Security](SECURITY.md) · [Review response](docs/astra-review-response.md) · How your documents are handled: the `/trust` page of any deployment (http://localhost:3000/trust locally)
 
 > The included Northstar HVAC deal is entirely fictional. BearCase is an educational prototype and does not provide financial, legal, tax, or investment advice. Do not upload confidential documents to a public deployment yet; see [Limits](#limits).
 
@@ -21,9 +23,9 @@ A first session should let you answer four questions about a deal:
 | What is the seller claiming? | Claim Audit | Each material claim with its status: supported, contradicted, unsupported, or review required, and the rule that decided it. |
 | What does the evidence say? | The source, one click from any claim | The page paragraph or spreadsheet row the claim rests on, highlighted, so you can judge it yourself. |
 | What could change my judgment? | Scenario Lab | Base, downside, and severe cases, with debt coverage against the lender's threshold. |
-| What do I need from the seller? | Overview and report | The missing-information list, open questions, and a review you can export. |
+| What do I need from the seller? | Questions for the seller (`/app/deals/[id]/questions`) and the report | One question per contradiction, unsupported claim, missing document, covenant warning, concentration, contract risk, or integrity finding, each with why it matters and its evidence, exportable as Markdown or text. The report's "Management questions" section is built by the same function. |
 
-The short path, on the demo or your own deal: add documents, check the findings, test a downside, export the review. The deal overview opens with a start section that names your next step and explains the two numbers most people ask about first (adjusted EBITDA and DSCR) in plain words.
+The short path, on the demo or your own deal: upload documents, see the important discrepancies, inspect the evidence, export the questions for the seller. A progress strip on the deal overview shows those four steps and which are done; the start section names your next step and explains the two numbers most people ask about first (adjusted EBITDA and DSCR) in plain words.
 
 ## How it works
 
@@ -167,6 +169,8 @@ The evaluation report lists each check with pass/fail and detail. Both the tests
 
 What the evaluation proves: that the pipeline still produces the expected result on the Northstar fixtures with the mock provider. What it does not prove: extraction accuracy on documents it has never seen, or prompt-injection resistance of a live model. Measuring those needs an independently labelled set of unfamiliar deals (messy workbooks, scanned PDFs, conflicting versions, missing documents) and a real key; neither exists in this repository yet.
 
+The second instrument is the reviewed-work set: every reviewer decision on a claim sits next to the AI's original output, and `bearcase export-reviews --deal <id> --out file.jsonl` (or `GET /api/deals/{id}/review-dataset`, owner only, audited) exports one JSONL line per reviewed claim. `bearcase eval --reviews file.jsonl` prints the agreement between the AI's status and the reviewer's, overall and per claim type, plus the count of corrections. How both instruments gate a release, and the release record, are in [docs/evaluation.md](docs/evaluation.md).
+
 ## Screenshots
 
 | Claim Audit: split view with rule-level explanation | Clickable cell citation opens the source |
@@ -189,7 +193,7 @@ More: [Deal Room](docs/screenshots/03-deal-room.png), [overview](docs/screenshot
 apps/web   Next.js 16 App Router, TypeScript strict, Tailwind v4, TanStack Query, Zod, Motion, React Three Fiber
 apps/api   FastAPI, SQLAlchemy 2, Alembic, Pydantic v2, PyMuPDF, openpyxl, Anthropic SDK, OpenAI-compatible client
 fixtures/  Northstar HVAC files and ground truth (generated by `bearcase generate-fixtures`)
-docs/      design system, architecture, data model, AI trust boundary, formulas, implementation plan, review response
+docs/      design system, architecture, data model, AI trust boundary, formulas, go-to-market, evaluation, implementation plan, review response
 infra/     Docker Compose and Dockerfiles
 ```
 
@@ -206,6 +210,7 @@ AI classifies documents, extracts and compares claims, ranks evidence, and draft
 - Document text is passed to the model inside `<document>` tags with an explicit rule that it is data, never instructions. Instruction-like text is detected, stored inert, and reported as a finding.
 - Sessions are opaque tokens stored hashed with an httpOnly cookie; passwords use Argon2. Every deal-owned query is scoped to the owner. Demo visitors are isolated from each other.
 - The routes that parse, analyse, seed, or call a model (demo start, upload, reprocess, process, chat, ask, report generation, plus sign-in and registration by client address) have a per-user token-bucket rate limit (60 per minute by default; 429 with `Retry-After`), and storage is capped at 50 documents per deal and 500 MB per user. There are no ingress body limits yet, and the limiter is per process.
+- The owner can delete a document (`DELETE /api/deals/{id}/documents/{document_id}`): the file, its versions, its evidence, and the claims that came from it are removed, the event is recorded, and the app suggests running the analysis again because findings and metrics may be stale. Demo uploads are removed 14 days after the visitor's newest session expires; uploads to a signed-in account are kept until the owner deletes them. The `/trust` page explains retention and which provider sees what.
 
 See [SECURITY.md](SECURITY.md) for the full list of controls and known gaps.
 
@@ -220,7 +225,7 @@ This is a portfolio prototype with synthetic data. Read these before relying on 
 - **Document handling is limited.** PDF, XLSX, and CSV only; text-layer PDFs only (no OCR); an income statement sheet must be named like one (`Income Statement`, `P&L`, `Profit and Loss`); no manual mapping, currency handling, monthly periods, or version comparison yet.
 - **Financial modelling is limited.** Outputs depend on mapped and reviewed inputs; interest-only and balloon debt are not modelled; IRR is periodic, not date-aware; the sensitivity grid varies two inputs.
 - **The evaluation is a regression check** on the Northstar fixtures with the mock provider, not an accuracy measurement on unfamiliar documents. No live model has been run end to end here.
-- **Not ready for confidential deals.** Demo isolation with retention, rate limits, and storage quotas exist; ingress body limits, a shared limiter across API processes, deletion and retention for your own uploads, monitoring, encryption at rest, CSRF tokens, account recovery, a dependency CVE scan, and an external penetration test do not. Free model tiers may log what you send.
+- **Not ready for confidential deals.** Demo isolation with retention, rate limits, storage quotas, and owner deletion of documents exist; ingress body limits, a shared limiter across API processes, automatic retention for your own uploads, monitoring, encryption at rest, CSRF tokens, account recovery, a dependency CVE scan, and an external penetration test do not. Free model tiers may log what you send.
 - **Contract review is not legal advice**, and nothing here is investment advice.
 
 ## License

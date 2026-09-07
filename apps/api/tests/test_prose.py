@@ -18,7 +18,9 @@ UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 # "3.00000000", "22.00772201", "0E-8", "1E+2": what str(Decimal) leaks when a value skips the formatter.
 DECIMAL_REPR_RE = re.compile(r"\d\.\d{4,}|\d+E[+-]\d+|\bDecimal\(")
 MATERIAL_RE = re.compile(r"\d|\$|%")  # mirrors reports/validate.py
-NORTHSTAR_MATERIAL_STATEMENTS = 36  # baseline recorded in HANDOFF.md; change deliberately, never by accident
+# Baseline recorded in HANDOFF.md; change deliberately, never by accident. 36 while the provider drafted the
+# management questions; 43 since that section became the deterministic seller-question list (reports/assemble.py).
+NORTHSTAR_MATERIAL_STATEMENTS = 43
 
 
 def _report(client, demo) -> dict:

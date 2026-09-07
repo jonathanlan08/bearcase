@@ -150,6 +150,41 @@ REGISTRY: dict[str, ProviderSpec] = {
 AUTO_ORDER = ("anthropic", "openai", "gemini", "groq", "openrouter", "ollama")
 OPTION_ORDER = ("gemini", "groq", "openrouter", "ollama", "openai", "anthropic")
 
+# Price table for the usage estimate (api/routes/insights.py): USD per million input and output tokens, applied
+# to the token counts each reply reported. Providers with a free tier are counted at $0 (their paid tiers differ);
+# a local Ollama model and the rule-based composer cost nothing. An id with no entry yields no estimate, never a guess.
+PRICE_PER_MILLION_TOKENS: dict[str, tuple[float, float]] = {
+    "claude-haiku-4-5": (1.0, 5.0),
+    "claude-sonnet-5": (2.0, 10.0),
+    "gpt-5.6-luna": (0.20, 1.20),
+}
+FREE_TIER_PROVIDERS = frozenset({"mock", "gemini", "groq", "ollama"})
+PRICING_NOTE = (
+    "Estimate only: a fixed price table (USD per million input and output tokens) applied to the tokens each chat "
+    "reply reported. Gemini, Groq, and OpenRouter ':free' ids are counted at $0 on their free tiers; paid tiers differ. "
+    "The rule-based composer and a local Ollama model cost nothing. Document processing with the rule-based provider "
+    "uses no model tokens."
+)
+
+
+def price_for(provider: str, model: str) -> tuple[float, float] | None:
+    """USD per million (input, output) tokens for a provider and model id, or None when no price is known."""
+    if model in PRICE_PER_MILLION_TOKENS:
+        return PRICE_PER_MILLION_TOKENS[model]
+    if provider in FREE_TIER_PROVIDERS:
+        return (0.0, 0.0)
+    if provider == "openrouter" and model.endswith(":free"):
+        return (0.0, 0.0)
+    return None
+
+
+def estimate_cost(provider: str, model: str, input_tokens: int, output_tokens: int) -> float | None:
+    """Cost in USD of one reply, or None when the model has no known price."""
+    price = price_for(provider, model)
+    if price is None:
+        return None
+    return (max(0, input_tokens) * price[0] + max(0, output_tokens) * price[1]) / 1_000_000
+
 
 @dataclass(frozen=True, repr=False)
 class ChatBackend:

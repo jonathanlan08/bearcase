@@ -22,6 +22,8 @@ BearCase is a portfolio prototype. These notes describe what it does today, not 
 | Authentication | Argon2 password hashing; opaque session tokens stored as HMAC-SHA256 hashes; httpOnly, SameSite=Lax cookie, Secure in production mode; bearer header supported |
 | Authorization | Every deal-owned resource is fetched through the deal and the deal through `owner_id`; cross-user access returns 404 |
 | Demo isolation | Each visitor to `/demo` gets a private demo identity (`visitor-<id>@demo.bearcase.invalid`, a reserved domain) and their own seeded copy of the Northstar deal; a caller with a live session, visitor or signed-in account, keeps that identity; sessions issued for the old shared demo user no longer resolve, so an old cookie yields a fresh visitor; a regression test checks that one visitor cannot read another visitor's deal. A visitor's identity, deals, and files are deleted 14 days after their newest session expired (`BEARCASE_DEMO_RETENTION_DAYS`); cleanup runs when a demo starts, at most 20 users per call, and a cleanup failure never blocks the demo. Demo start is rate-limited by client address |
+| Document deletion | `DELETE /api/deals/{id}/documents/{document_id}` is owner-scoped through `get_deal` and returns 204; it removes the document row, its versions and stored files, the evidence read from it, and the claims whose source is that document together with their evidence links and reviewer decisions; the audit history keeps `document.deleted` with the document name and counts; the response header `X-BearCase-Reanalyse: true` tells the UI that findings and metrics may be stale and to offer "Run analysis"; deletion frees the deal's document count and the user's storage allowance |
+| Retention | Demo visitors: identity, deals, and files are deleted 14 days after the newest session expires (`BEARCASE_DEMO_RETENTION_DAYS`, see Demo isolation). Signed-in accounts: uploads are kept until the owner deletes them; there is no automatic retention period yet, and the public `/trust` page states this together with which provider receives document text (extraction, when live) and claim text plus evidence snippets (chat). Exports that leave the system, the seller-questions file and the review dataset (`review_dataset.exported`, owner only), carry claim text and evidence snippets and are the owner's to keep or delete |
 | AI boundary | Document text is wrapped as untrusted data; instruction-like text detected and stored inert; provider output validated against versioned schemas; citations must resolve or the claim is dropped; status guardrails enforced in code; chat reaches the deal only through read-only tools over persisted rows; context handed from a page into the chat is plain user text |
 | Provider keys | Read from the environment or `.env` only; each key is sent only to its own provider's endpoint or to a gateway named in `BEARCASE_CHAT_BASE_URL` (https except loopback and private networks); no endpoint returns a key; keys are redacted from provider error text before it is streamed, stored, or logged |
 | Immutability | Original extraction is never overwritten; reviewer decisions are additive rows; scenario results store input snapshots and hashes; audit events for every state change |
@@ -39,7 +41,7 @@ Before a URL is shared with anyone, in this order; `docs/deployment.md` has the 
 5. `BEARCASE_CORS_ORIGINS` set to the web app's origin as a JSON list without a trailing slash; TLS everywhere; `BEARCASE_TRUST_PROXY_HEADERS=true` only behind a proxy that appends to `X-Forwarded-For` (Render does).
 6. Rate limits on (`BEARCASE_RATE_LIMIT_ENABLED=true`, the default) and one API instance, because the limiter is in process memory; a body-size limit and a connection limit at the ingress, since the application checks the upload cap only after receiving the file.
 7. Read the startup log line once: it names the environment, database, storage, job runner, extraction provider, chat backend, and limiter, and lists the production warnings.
-8. Decide backups, retention, and monitoring before storing anything that matters; none of the three exists in the application (see the gaps below).
+8. Decide backups, retention, and monitoring before storing anything that matters. Owners can delete documents and demo data expires, but backups, an automatic retention period for accounts, and monitoring do not exist in the application (see the gaps below).
 
 ## Known gaps (not implemented)
 
@@ -48,12 +50,12 @@ Resource limits
 - No request or body limits at the ingress. Put a reverse proxy in front with a body-size limit at or below the upload cap and a connection limit; the application limits are a second line, not the first.
 - The rate limiter lives in one process. With several API processes each enforces its own budget; a public deployment needs one shared limiter.
 - Parser CPU and memory are not bounded, and job concurrency is not limited beyond the single in-process runner.
-- No retry or cost caps on live model calls; the extraction provider retries twice by default.
-- Documents cannot be deleted through the API, so a full deal or a full storage allowance stays full until an operator intervenes.
+- No retry or cost caps on live model calls; the extraction provider retries twice by default. `GET /api/deals/{id}/usage` reports tokens and an estimated cost per deal, which is tracking, not a cap.
 
 Data handling
 
-- No retention policy or deletion workflow for uploads outside demo sandboxes.
+- No automatic retention period for uploads outside demo sandboxes; the owner deletes documents one at a time, and there is no account or deal deletion yet.
+- The review-dataset export needs the deal owner's permission to be kept for evaluation; that permission is recorded by hand, not as a field on the deal.
 - No encryption at rest beyond what the database or object store provides.
 - No virus scanning of uploads.
 - Free model tiers (Gemini free tier, OpenRouter `:free` endpoints) may log or train on what is sent; the chat sends claim text and evidence snippets.

@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Upload, RefreshCw, Eye, ChevronDown } from "lucide-react";
+import { Dialog } from "radix-ui";
+import { Upload, RefreshCw, Eye, ChevronDown, Trash2 } from "lucide-react";
 import { api, ApiError, type DealSummary, type Doc, type Job } from "@/lib/api";
-import { useDocs, useJobs, useProcessDeal, useSummary, qk } from "@/components/app/hooks";
+import { useDocs, useInvalidateDeal, useJobs, useProcessDeal, useSummary, qk } from "@/components/app/hooks";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, Panel, Skeleton } from "@/components/ui/primitives";
@@ -40,6 +41,23 @@ export default function DocumentsPage() {
     onError: (e) => { const d = e instanceof ApiError ? e.detail : null; const errs = d && typeof d === "object" && "errors" in d ? (d as { errors: Array<{ file: string; message: string }> }).errors : null; toast({ title: "Upload rejected", description: errs ? errs.map((x) => `${x.file}: ${x.message}`).join(" ") : String(e), tone: "error" }); },
   });
   const reprocess = useMutation({ mutationFn: (id: string) => api.post(`/api/deals/${dealId}/documents/${id}/reprocess`), onSuccess: () => { qc.invalidateQueries({ queryKey: qk.docs(dealId) }); qc.invalidateQueries({ queryKey: qk.jobs(dealId) }); } });
+  // Deletion: a confirm step first, then the server removes the document, its evidence, and the claims that came from it.
+  // Findings, metrics, and questions are not recomputed by the delete, so the reply's header asks for a re-run and the page keeps asking until one is queued.
+  const [toDelete, setToDelete] = useState<Doc | null>(null);
+  const [stale, setStale] = useState(false);
+  const invalidateDeal = useInvalidateDeal(dealId);
+  const runAgain = () => process.mutate(true, { onSuccess: () => { setStale(false); toast({ title: "Analysis queued", description: "Claims, findings, metrics, and questions will be rebuilt from the documents that remain." }); } });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.del(`/api/deals/${dealId}/documents/${id}`),
+    onSuccess: (headers) => {
+      setToDelete(null);
+      invalidateDeal();
+      const reanalyse = headers.get("X-BearCase-Reanalyse") === "true";
+      if (reanalyse) setStale(true);
+      toast({ title: "Document deleted", description: reanalyse ? "Its evidence and claims are gone. Findings, metrics, and questions may now be out of date." : "Its evidence and claims are gone.", tone: "success", action: reanalyse ? { label: "Run analysis", onClick: runAgain } : undefined });
+    },
+    onError: (e) => toast({ title: "Could not delete the document", description: String(e), tone: "error" }),
+  });
   const onFiles = (list: FileList | null) => { if (list && list.length) upload.mutate(Array.from(list)); };
   const jobFor = (doc: Doc): Job | undefined => jobs.data?.find((j) => j.document_id === doc.id);
   const anyReady = docs.data?.some((d) => d.status === "ready") ?? false;
@@ -53,6 +71,13 @@ export default function DocumentsPage() {
         </>
       }>
         <p className="mt-2 max-w-3xl text-sm text-fg-muted">Add the seller’s documents, let BearCase read them, then run analysis. Three questions below: what you uploaded, what we understood, and what is still missing.</p>
+        {stale && (
+          <div role="status" className="mt-3 flex flex-wrap items-center gap-3 rounded-[var(--radius-2)] border border-amber px-3 py-2 text-sm">
+            <StatusGlyph status="review_required" />
+            <span className="min-w-0 flex-1">A document was deleted. Findings, metrics, scenarios, and the questions for the seller may be out of date until analysis runs again.</span>
+            <Button size="sm" variant="secondary" onClick={runAgain} loading={process.isPending}>Run analysis</Button>
+          </div>
+        )}
         <input ref={fileRef} type="file" accept=".pdf,.xlsx,.csv" multiple className="sr-only" aria-label="Upload documents" onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
       </PageHeader>
       <div className="grid grid-cols-[minmax(0,1fr)] gap-4 p-4 md:p-6 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -89,7 +114,8 @@ export default function DocumentsPage() {
                         </td>
                         <td className={`${td} whitespace-nowrap`}>
                           <button type="button" className="mr-1 inline-flex h-7 items-center gap-1 rounded-[var(--radius-1)] px-2 text-xs hover:bg-bg-muted disabled:opacity-40" onClick={() => setViewer({ documentId: d.id, documentName: d.display_name })} disabled={d.status !== "ready"}><Eye size={12} /> View</button>
-                          <button type="button" className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-1)] px-2 text-xs hover:bg-bg-muted" onClick={() => reprocess.mutate(d.id)}><RefreshCw size={12} /> Read again</button>
+                          <button type="button" className="mr-1 inline-flex h-7 items-center gap-1 rounded-[var(--radius-1)] px-2 text-xs hover:bg-bg-muted" onClick={() => reprocess.mutate(d.id)}><RefreshCw size={12} /> Read again</button>
+                          <button type="button" className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-1)] px-2 text-xs text-fg-muted hover:bg-bg-muted hover:text-red disabled:opacity-40" onClick={() => setToDelete(d)} disabled={running} aria-label={`Delete ${d.display_name}`}><Trash2 size={12} /> Delete</button>
                         </td>
                       </tr>
                     );
@@ -115,7 +141,33 @@ export default function DocumentsPage() {
         </Panel>
       </div>
       <DocumentViewer dealId={dealId} target={viewer} onClose={() => setViewer(null)} />
+      <DeleteDialog doc={toDelete} pending={remove.isPending} onCancel={() => setToDelete(null)} onConfirm={() => { if (toDelete) remove.mutate(toDelete.id); }} />
     </div>
+  );
+}
+
+/** The confirm step before a document is deleted: what goes with it, in plain words, and what to do afterwards. */
+function DeleteDialog({ doc, pending, onCancel, onConfirm }: { doc: Doc | null; pending: boolean; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <Dialog.Root open={!!doc} onOpenChange={(o) => { if (!o && !pending) onCancel(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-ink-950/40" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(520px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-[var(--radius-3)] border border-hairline bg-bg-raised p-5 shadow-[var(--shadow-2)] outline-none">
+          <Dialog.Title className="text-lg font-medium">Delete {doc?.display_name ?? "this document"}?</Dialog.Title>
+          <Dialog.Description className="mt-1 text-sm text-fg-muted">This cannot be undone. Deleting the document removes:</Dialog.Description>
+          <ul className="mt-3 list-disc pl-5 text-sm text-fg-muted">
+            <li>the file and every stored version of it;</li>
+            <li>the evidence read from it, so citations that pointed at it will no longer open;</li>
+            <li>the claims that came from it, with their evidence links and any reviewer decisions on them.</li>
+          </ul>
+          <p className="mt-3 text-sm text-fg-muted">Findings, metrics, scenarios, and the questions for the seller are not rebuilt by the delete. Run analysis again afterwards so they reflect the documents that remain. The audit history keeps a record that the document was deleted, without its contents.</p>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={onCancel} disabled={pending}>Cancel</Button>
+            <Button type="button" variant="danger" onClick={onConfirm} loading={pending} icon={<Trash2 size={14} />}>Delete document</Button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 

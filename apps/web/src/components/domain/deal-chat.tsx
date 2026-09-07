@@ -12,6 +12,7 @@ import { Kbd } from "@/components/ui/primitives";
 import { StatusGlyph } from "@/components/domain/status";
 import { Markdown, stripCitations, type CitationSources } from "@/components/domain/markdown";
 import { DocumentViewer, type ViewerTarget } from "@/components/domain/document-viewer";
+import { StatementKindsLegend } from "@/components/domain/statement-kinds";
 import { fmtDate, fmtInt } from "@/lib/format";
 
 /** "deal" when the reply used deal tools, resolved a citation, or stated an uncited figure; "general" only for a grounded general-assistant answer. */
@@ -262,6 +263,7 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
                   <p className="text-base font-semibold text-fg">Ask anything.</p>
                   {config.data && !live && <p className="mt-2 max-w-[46ch]">{config.data.note}</p>}
                   <p className="mt-2 max-w-[46ch]">Deal facts come from the claim ledger, verified metrics, add-back decisions, scenario runs, and the documents, each with a citation you can open. A citation shows where a figure came from, not that the whole answer is right, so open the sources before you rely on it. Everything else is answered as a general assistant.</p>
+                  <StatementKindsLegend className="mt-3 max-w-[60ch]" />
                 </div>
                 {config.data && !live && <ConnectModel options={config.data.options} />}
                 {config.data && (

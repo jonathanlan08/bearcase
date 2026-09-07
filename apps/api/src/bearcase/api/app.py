@@ -22,7 +22,9 @@ from bearcase.api.routes import (
     documents,
     financials,
     health,
+    insights,
     questions,
+    questions_seller,
     reports,
     scenarios,
 )
@@ -74,7 +76,14 @@ def create_app() -> FastAPI:
         redoc_url=None,
     )
     app.add_middleware(
-        CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"]
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        # Downloads name their file and the delete route flags stale analysis; a cross-origin browser client
+        # only sees these headers when they are exposed (the Next.js rewrite is same-origin and needs nothing).
+        expose_headers=["Content-Disposition", "X-BearCase-Reanalyse"],
     )
 
     @app.exception_handler(ValueError)
@@ -96,6 +105,8 @@ def create_app() -> FastAPI:
         reports.router,
         audit.router,
         questions.router,
+        questions_seller.router,
+        insights.router,
         chat.router,
     ):
         app.include_router(router, prefix="/api")

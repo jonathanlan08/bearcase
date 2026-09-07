@@ -1,4 +1,4 @@
-"""BearCase command line: serve, migrate, doctor, seed, worker, generate-fixtures, eval."""
+"""BearCase command line: serve, migrate, doctor, seed, worker, generate-fixtures, eval, export-reviews."""
 
 from __future__ import annotations
 
@@ -78,11 +78,50 @@ def cmd_generate_fixtures(args: argparse.Namespace) -> int:
 
 
 def cmd_eval(args: argparse.Namespace) -> int:
+    if getattr(args, "reviews", None):
+        # Agreement between the AI status and reviewer decisions over an exported review dataset; no seeding,
+        # no model, no database: the file is the whole input.
+        from bearcase.evals.run import review_agreement
+
+        agreement = review_agreement(Path(args.reviews))
+        print(json.dumps(agreement, indent=2) if args.json else agreement["summary_text"])
+        return 0
     from bearcase.evals.run import run_evals
 
     report = run_evals()
     print(json.dumps(report, indent=2) if args.json else report["summary_text"])
     return 0 if report["passed"] else 1
+
+
+def cmd_export_reviews(args: argparse.Namespace) -> int:
+    """Write the reviewed claims of one deal (or every deal) as JSON lines: the AI assessment beside the
+    reviewer's decision and the cited evidence. Operator tooling over the configured database, so it is not
+    owner-scoped the way the API export is."""
+    from sqlalchemy import select
+
+    from bearcase.api.routes.insights import review_dataset_rows, to_jsonl
+    from bearcase.db import session_scope
+    from bearcase.models import Deal
+
+    out = Path(args.out)
+    with session_scope() as db:
+        if args.deal:
+            try:
+                deal_id = uuid.UUID(args.deal)
+            except ValueError:
+                raise SystemExit(f"--deal must be a deal id, got {args.deal!r}") from None
+            deal = db.get(Deal, deal_id)
+            if deal is None:
+                raise SystemExit(f"deal {args.deal} not found")
+            deals = [deal]
+        else:
+            deals = list(db.scalars(select(Deal).order_by(Deal.created_at, Deal.id)))
+        rows = [row for deal in deals for row in review_dataset_rows(db, deal)]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(to_jsonl(rows), encoding="utf-8")
+    scope = f"deal {args.deal}" if args.deal else f"{len(deals)} deal{'s' if len(deals) != 1 else ''}"
+    print(f"wrote {len(rows)} reviewed claim{'s' if len(rows) != 1 else ''} from {scope} to {out}")
+    return 0
 
 
 # ---- doctor -----------------------------------------------------------------------------------------------
@@ -313,7 +352,16 @@ def main(argv: list[str] | None = None) -> int:
     g.set_defaults(fn=cmd_generate_fixtures)
     e = sub.add_parser("eval", help="Run the AI evaluation suite against ground truth")
     e.add_argument("--json", action="store_true")
+    e.add_argument(
+        "--reviews",
+        metavar="FILE.jsonl",
+        help="Instead of the suite, score AI status against reviewer decisions in a file from `bearcase export-reviews`",
+    )
     e.set_defaults(fn=cmd_eval)
+    x = sub.add_parser("export-reviews", help="Write reviewed claims (AI assessment, reviewer decision, evidence) as JSON lines")
+    x.add_argument("--deal", help="Deal id; every deal when omitted")
+    x.add_argument("--out", required=True, help="Output file path (.jsonl)")
+    x.set_defaults(fn=cmd_export_reviews)
     args = parser.parse_args(argv)
     return args.fn(args)
 

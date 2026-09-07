@@ -25,6 +25,7 @@ export function SiteNav() {
         <Link href="/" className="rounded-[var(--radius-1)]"><Wordmark size="lg" /></Link>
         <nav aria-label="Site" className="hidden items-center gap-7 text-sm md:flex">
           <Link href="/methodology" className="text-fg-muted hover:text-fg">Methodology</Link>
+          <Link href="/trust" className="text-fg-muted hover:text-fg">Trust &amp; data</Link>
           <Link href="/app" className="text-fg-muted hover:text-fg">Open your workspace</Link>
           <Link href="/demo" className={buttonClass("primary", "sm")}>Explore the demo</Link>
         </nav>
@@ -37,6 +38,7 @@ export function SiteNav() {
         <nav id="site-menu" aria-label="Site" className="border-t border-hairline px-6 py-4 md:hidden">
           <ul className="flex flex-col gap-3 text-base">
             <li><Link href="/methodology" onClick={() => setOpen(false)}>Methodology</Link></li>
+            <li><Link href="/trust" onClick={() => setOpen(false)}>Trust &amp; data</Link></li>
             <li><Link href="/app" onClick={() => setOpen(false)}>Open your workspace</Link></li>
             <li><Link href="/demo" onClick={() => setOpen(false)}>Explore the demo</Link></li>
           </ul>
@@ -52,7 +54,7 @@ export function SiteFooter() {
       <div className="mx-auto grid max-w-[1200px] gap-10 px-6 py-14 md:grid-cols-3 lg:px-10">
         <div>
           <Wordmark />
-          <p className="mt-3 max-w-xs text-sm text-fg-muted">Checks a seller&apos;s claims against the documents before you buy a business. Open source, MIT licensed.</p>
+          <p className="mt-3 max-w-xs text-sm text-fg-muted">Checks a seller&apos;s documents for financial inconsistencies and shows you what to investigate before you buy the business. Open source, MIT licensed.</p>
         </div>
         <div>
           <p className="text-sm font-semibold">Product</p>
@@ -60,6 +62,7 @@ export function SiteFooter() {
             <li><Link href="/demo" className="hover:underline">Explore the demo</Link></li>
             <li><Link href="/app" className="hover:underline">Open your workspace</Link></li>
             <li><Link href="/methodology" className="hover:underline">Methodology</Link></li>
+            <li><Link href="/trust" className="hover:underline">How we handle your documents</Link></li>
             <li><a href={GITHUB} className="hover:underline" target="_blank" rel="noreferrer">View on GitHub</a></li>
           </ul>
         </div>

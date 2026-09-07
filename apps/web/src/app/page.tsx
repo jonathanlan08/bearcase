@@ -9,7 +9,7 @@ import { fmtMoney, fmtX } from "@/lib/format";
 
 export const metadata: Metadata = {
   title: "BearCase AI",
-  description: "Check whether a seller's story matches the documents before you buy a business. Every claim gets a source, every number is recomputed, and the downside is tested against the loan.",
+  description: "BearCase checks a seller's documents for financial inconsistencies and shows you what to investigate before buying the business.",
 };
 
 /** Demo facts come from the committed Northstar snapshot, the same file the figures render from, so the copy cannot drift from the figures. */
@@ -29,11 +29,12 @@ const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "e
 const word = (n: number) => WORDS[n] ?? String(n);
 const capWord = (n: number) => { const w = word(n); return w.charAt(0).toUpperCase() + w.slice(1); };
 
+/** The same four steps the deal overview tracks, in the same words. */
 const FIRST_SESSION: Array<[string, string]> = [
   ["Add documents", "Upload what the seller gave you: the sales memo, the financial statements, the customer list, the contracts, and the loan terms."],
-  ["Check the findings", "Each claim is marked supported, contradicted, unsupported, or review required, with the page or cell it came from beside it."],
-  ["Test the downside", "Lose the largest customer or squeeze margins, then see whether the cash still covers the loan payments."],
-  ["Export the review", "A report you can hand to a lender, a partner, or a committee, with a citation on every material statement and every reviewer decision recorded."],
+  ["Check the findings", "Each claim is marked supported, contradicted, unsupported, or review required, with the page or cell it came from beside it. Start with the ones the documents disagree with."],
+  ["Inspect the evidence", "Open the cited page or cell next to the claim and decide for yourself. Test the downside too: lose the largest customer and see whether the cash still covers the loan."],
+  ["Send questions to the seller", "Every contradiction and every gap becomes a question with its evidence attached. Copy the list or download it, and ask the seller before you sign."],
 ];
 
 export default function LandingPage() {
@@ -139,15 +140,15 @@ export default function LandingPage() {
         <section className="border-t border-hairline">
           <div className="mx-auto max-w-[1200px] px-6 py-24 lg:px-10">
             <div className="max-w-[720px]">
-              <h2 className="text-4xl md:text-5xl">Open the fictional Northstar deal.</h2>
+              <h2 className="text-4xl md:text-5xl">Buying a small business for the first time? See what the checks find.</h2>
               <p className="mt-4 text-lg text-fg-muted">
-                {capWord(DEMO.headlineClaims)} headline claims from the sales memo, {word(DEMO.contradicted)} of them contradicted by the seller&apos;s own documents. {capWord(DEMO.addbacks)} add-backs put to the test: the seller says <span className="num">{DEMO.sellerEbitda}</span>, the statements support <span className="num">{DEMO.verifiedEbitda}</span>. {capWord(DEMO.belowCovenant)} of {word(DEMO.scenarios)} scenarios fall below the lender&apos;s <span className="num">{DEMO.covenant}</span> minimum.
+                BearCase is for the person about to buy a company on the strength of the seller&apos;s package: an owner-operator, a search fund, a family taking on a loan. In the fictional Northstar deal, {word(DEMO.headlineClaims)} headline claims come from the sales memo and {word(DEMO.contradicted)} of them are contradicted by the seller&apos;s own documents. {capWord(DEMO.addbacks)} add-backs are put to the test: the seller says <span className="num">{DEMO.sellerEbitda}</span>, the statements support <span className="num">{DEMO.verifiedEbitda}</span>. {capWord(DEMO.belowCovenant)} of {word(DEMO.scenarios)} scenarios fall below the lender&apos;s <span className="num">{DEMO.covenant}</span> minimum. Each one ends as a question for the seller, with the evidence attached.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 <Link href="/demo" className={buttonClass("primary", "md", "h-11 px-5")}>Explore the demo</Link>
                 <Link href="/app" className={buttonClass("secondary", "md", "h-11 px-5")}>Open your workspace</Link>
               </div>
-              <p className="mt-4 text-sm text-fg-muted">Try a fictional deal. No account or API key needed.</p>
+              <p className="mt-4 text-sm text-fg-muted">Try a fictional deal. No account or API key needed. <Link href="/trust" className="underline underline-offset-2 hover:text-fg">How we handle your documents</Link>.</p>
               <p className="mt-8 max-w-[560px] text-sm text-fg-muted">Northstar HVAC is fictional. BearCase is an educational prototype and does not provide financial, legal, tax, or investment advice.</p>
             </div>
           </div>

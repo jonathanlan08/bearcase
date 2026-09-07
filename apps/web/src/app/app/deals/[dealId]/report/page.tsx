@@ -12,6 +12,7 @@ import { EmptyState, ErrorState, Skeleton } from "@/components/ui/primitives";
 import { Table, td, th } from "@/components/ui/table";
 import { StatusChip, StatusGlyph } from "@/components/domain/status";
 import { DocumentViewer, type ViewerTarget } from "@/components/domain/document-viewer";
+import { StatementKindsLegend } from "@/components/domain/statement-kinds";
 import { fmtDateTime, titleCase } from "@/lib/format";
 import { useToast } from "@/components/ui/toast";
 
@@ -53,7 +54,12 @@ export default function ReportPage() {
             <span className="text-xs text-fg-muted">{r.provider}/{r.model}, prompt {r.prompt_version}, schema {r.schema_version}, engine {r.engine_version}</span>
           </div>
         )}
-        {r && <p className="mt-2 max-w-3xl text-xs text-fg-muted">Citation chips: E opens the cited document at that spot; M marks a number computed by the deterministic engine. A cited link shows where a statement came from, not that the statement is correct.</p>}
+        {r && (
+          <div className="mt-3 max-w-3xl">
+            <StatementKindsLegend />
+            <p className="mt-1.5 text-xs text-fg-muted">A citation shows where a statement came from, not that the statement is correct. Open the source before you rely on it.</p>
+          </div>
+        )}
       </PageHeader>
       {report.isPending && <div className="p-6"><Skeleton className="h-6 w-1/2" /><Skeleton className="mt-4 h-64" /></div>}
       {report.isError && <div className="p-6"><ErrorState detail={String(report.error)} onRetry={() => report.refetch()} /></div>}

@@ -275,6 +275,182 @@ def _verified_cell(c: Claim, metric: FinancialMetric | None) -> str:
     return format_value(c.verified_value, (c.verified_unit or c.claimed_unit).value)
 
 
+# ---------- seller questions ------------------------------------------------------------------
+#
+# One deterministic list, built from persisted findings and claims, that the "Questions for the seller"
+# page, its export, and the report's "Management questions" section all share, so they never disagree.
+# No model is involved: every question is a template over a finding title, a quoted seller statement,
+# and the engine's verified figure. Ids never appear in the text; they travel in evidence_ids/metric_ids.
+
+QUESTION_KINDS: dict[FindingKind, str] = {
+    FindingKind.CONTRADICTION: "contradiction",
+    FindingKind.UNSUPPORTED_ASSUMPTION: "unsupported",
+    FindingKind.MISSING_DOCUMENT: "missing_document",
+    FindingKind.COVENANT_WARNING: "covenant",
+    FindingKind.CONCENTRATION: "concentration",
+    FindingKind.RISK: "risk",
+    FindingKind.DOCUMENT_INTEGRITY: "integrity",
+}
+QUESTION_KIND_ORDER = ["contradiction", "unsupported", "concentration", "risk", "covenant", "missing_document", "integrity"]
+SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+_QUESTION_STATUSES = {"contradicted", "unsupported", "review_required"}
+
+
+def _effective_status(c: Claim) -> str:
+    """The reviewer's current decision wins over the AI status (mirrors api/routes/deals.effective_status)."""
+    current = next((d for d in reversed(c.review_decisions) if d.is_current), None)
+    if current and current.resulting_status:
+        return current.resulting_status
+    return c.status.value
+
+
+def _document_names(evidence_ids: list[Any], index: dict[str, Evidence], first: Document | None = None) -> list[str]:
+    names: list[str] = [first.display_name] if first is not None else []
+    for eid in evidence_ids:
+        e = index.get(str(eid))
+        if e is not None and e.document is not None and e.document.display_name not in names:
+            names.append(e.document.display_name)
+    return names
+
+
+def _shows(names: list[str], phrase: str) -> str:
+    """'northstar-financial-statements.xlsx shows revenue CAGR of 11.6%' (or 'the primary documents show …')."""
+    if not names:
+        return f"the primary documents show {phrase}"
+    return f"{' and '.join(names[:2])} {'shows' if len(names[:2]) == 1 else 'show'} {phrase}"
+
+
+def _question_for_claim(c: Claim, status: str, metric: FinancialMetric | None, evidence_docs: list[str]) -> tuple[str, str]:
+    """Question and reason for a claim, by its effective status. The reason falls back to the AI rationale."""
+    source = _doc_label(c.document)
+    quoted = _quote(c.claim_text)
+    if status == "contradicted":
+        return (
+            f"The {source} says {quoted}, but {_shows(evidence_docs, _verified_phrase(c, metric))}. What explains the difference?",
+            _sentence(c.status_rationale, "The seller's figure and the figure recalculated from the primary documents disagree"),
+        )
+    if status == "unsupported":
+        return (
+            f"The {source} says {quoted}. Which document supports this, and can you provide it?",
+            _sentence(c.status_rationale, "No document in the deal room provides evidence for it"),
+        )
+    return (
+        f"The {source} says {quoted}. The evidence we found does not settle this; can you confirm it in writing and "
+        "point to the document that backs it?",
+        _sentence(c.status_rationale, "Related evidence was found but a person needs to decide"),
+    )
+
+
+def _question_for_finding(
+    f: Finding, claim: Claim | None, metric: FinancialMetric | None, evidence_docs: list[str]
+) -> tuple[str, str]:
+    why = _sentence(f.detail, f.title)
+    if f.kind == FindingKind.CONTRADICTION and claim is not None:
+        return _question_for_claim(claim, "contradicted", metric, evidence_docs)[0], why
+    if f.kind == FindingKind.UNSUPPORTED_ASSUMPTION and claim is not None:
+        return _question_for_claim(claim, "unsupported", metric, evidence_docs)[0], why
+    if f.kind == FindingKind.MISSING_DOCUMENT:
+        return f"Please provide the {_lower_first(f.title.removeprefix('Missing: '))}.", why
+    if f.kind == FindingKind.COVENANT_WARNING:
+        # Figure-free on purpose: the reason carries the coverage numbers, the metric id lets a reader open them.
+        scenario = _humanize(f.key.removeprefix("covenant:")).lower()
+        lead = (
+            f"In our {scenario} scenario the cash flow does not cover the loan payments the lender requires."
+            if " breaks " in f.title  # analyze.py titles a breach "… breaks the debt coverage covenant"
+            else f"In our {scenario} scenario the cash flow covers the loan payments with little room to spare."
+        )
+        return f"{lead} What signed renewals, backlog, or cost commitments for next year can you share?", why
+    if f.kind == FindingKind.CONCENTRATION:
+        return (
+            f"{f.title}. What is the term and renewal status of that relationship, and has the customer ever reduced "
+            "volume or given notice?",
+            why,
+        )
+    if f.kind == FindingKind.RISK:
+        return f"{f.title}. Would the customer sign a longer commitment before closing, and has it ever given notice?", why
+    if f.kind == FindingKind.DOCUMENT_INTEGRITY:
+        return f"{f.title}. Who prepared this file, and why is that text there?", why
+    return f"{f.title}. Can you explain this?", why
+
+
+def build_seller_questions(db: Session, deal: Deal) -> dict[str, Any]:
+    """Questions to put to the seller, one per finding plus one per claim the documents leave open, ordered by
+    severity. Deterministic over persisted rows: two calls on the same deal give the same list. A question tied
+    to a claim a reviewer has since marked supported is dropped, because the reviewer settled it."""
+    claims = list(db.scalars(select(Claim).where(Claim.deal_id == deal.id).order_by(Claim.created_at, Claim.id)))
+    findings = list(db.scalars(select(Finding).where(Finding.deal_id == deal.id).order_by(Finding.created_at, Finding.id)))
+    index = _evidence_index(db, deal.id)
+    metric_by_id = {str(m.id): m for m in _metric_map(db, deal.id).values()}
+    claim_by_id = {c.id: c for c in claims}
+
+    def metric_of(c: Claim | None) -> FinancialMetric | None:
+        return metric_by_id.get(str(c.verified_metric_id)) if c is not None and c.verified_metric_id else None
+
+    rows: list[tuple[tuple[int, int, Any, str], dict[str, Any]]] = []
+    covered: set[uuid.UUID] = set()
+    for f in findings:
+        claim = claim_by_id.get(f.claim_id) if f.claim_id else None
+        if claim is not None:
+            covered.add(claim.id)
+            if _effective_status(claim) == "supported":
+                continue
+        evidence_ids = [str(e) for e in f.evidence_ids]
+        if claim is not None and claim.source_evidence_id and str(claim.source_evidence_id) not in evidence_ids:
+            evidence_ids.append(str(claim.source_evidence_id))
+        question, why = _question_for_finding(f, claim, metric_of(claim), _document_names(f.evidence_ids, index))
+        kind = QUESTION_KINDS.get(f.kind, "risk")
+        rows.append(
+            (
+                (SEVERITY_RANK[f.severity.value], QUESTION_KIND_ORDER.index(kind), f.created_at, str(f.id)),
+                {
+                    "id": f"finding:{f.id}",
+                    "question": question,
+                    "why": why,
+                    "kind": kind,
+                    "severity": f.severity.value,
+                    "evidence_ids": evidence_ids,
+                    "metric_ids": [str(m) for m in f.metric_ids],
+                    "claim_id": str(claim.id) if claim is not None else None,
+                    "finding_id": str(f.id),
+                    "document_names": _document_names(evidence_ids, index, claim.document if claim is not None else None),
+                },
+            )
+        )
+    direct = 0
+    for c in claims:
+        status = _effective_status(c)
+        if c.id in covered or status not in _QUESTION_STATUSES:
+            continue
+        direct += 1
+        contra = [str(link.evidence_id) for link in c.links if link.role == LinkRole.CONTRADICTING]
+        evidence_ids = [*contra, *([str(c.source_evidence_id)] if c.source_evidence_id else [])]
+        question, why = _question_for_claim(c, status, metric_of(c), _document_names(contra, index))
+        kind = "contradiction" if status == "contradicted" else "unsupported"
+        severity = "high" if status == "contradicted" else "medium" if status == "unsupported" else "low"
+        rows.append(
+            (
+                (SEVERITY_RANK[severity], QUESTION_KIND_ORDER.index(kind), c.created_at, str(c.id)),
+                {
+                    "id": f"claim:{c.id}",
+                    "question": question,
+                    "why": why,
+                    "kind": kind,
+                    "severity": severity,
+                    "evidence_ids": [e for e in dict.fromkeys(evidence_ids)],
+                    "metric_ids": [str(c.verified_metric_id)] if c.verified_metric_id else [],
+                    "claim_id": str(c.id),
+                    "finding_id": None,
+                    "document_names": _document_names(evidence_ids, index, c.document),
+                },
+            )
+        )
+    rows.sort(key=lambda r: r[0])
+    return {
+        "questions": [q for _, q in rows],
+        "generated_from": {"findings": len(findings), "claims": len(covered) + direct},
+    }
+
+
 def build_material(
     db: Session,
     deal: Deal,
@@ -648,6 +824,17 @@ def assemble_report(db: Session, deal: Deal, provider: AIProvider, user_id: uuid
         kind="list",
     )
 
+    # Management questions come from the same deterministic builder as the "Questions for the seller" page
+    # and its export, so the report never disagrees with the page. The provider's draft of this section is
+    # not used (see the narrative loop below).
+    seller = build_seller_questions(db, deal)
+    section(
+        "management_questions",
+        [_stmt(q["question"], ev=q["evidence_ids"], me=q["metric_ids"]) for q in seller["questions"]]
+        or [_stmt("No open questions: every seller statement was supported and no document was missing.")],
+        kind="list",
+    )
+
     dec_rows = [
         {
             "label": d.action.value,
@@ -674,7 +861,7 @@ def assemble_report(db: Session, deal: Deal, provider: AIProvider, user_id: uuid
     narrative = provider.draft_narrative(material)
     if narrative.ok and narrative.output is not None:
         for ns in narrative.output.sections:
-            if ns.key in SECTION_TITLES:
+            if ns.key in SECTION_TITLES and ns.key != "management_questions":
                 section(ns.key, [_stmt(s.text, s.evidence_ids, s.metric_ids) for s in ns.statements])
     else:
         section(
