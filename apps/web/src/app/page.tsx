@@ -187,6 +187,7 @@ export default function LandingPage() {
                   ))}
                 </ol>
                 <p className="mt-6 text-xs text-fg-muted">Generated from the demo&apos;s findings by the same code that produces a real export. Open the demo to read all {word(DEMO.questions)} and download the file.</p>
+                <p className="mt-3 text-xs text-fg-muted">Northstar is a tidy package. <Link href="/demo?deal=messy" className="text-fg underline underline-offset-2">Try the messy one</Link>: a statement in thousands with the years reversed and one missing, revenue split across rows with no total, and promised documents that never arrived. BearCase flags each and stops to ask.</p>
               </figure>
             </div>
           </div>

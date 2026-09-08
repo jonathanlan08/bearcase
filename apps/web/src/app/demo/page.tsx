@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, ApiError, type Deal } from "@/lib/api";
 import { buttonClass } from "@/components/ui/button";
@@ -18,21 +18,27 @@ function describe(e: unknown): { reason: string; code: string | null } {
   return { reason: e instanceof Error ? e.message : String(e), code: null };
 }
 
-/** Starts a demo session (seeding Northstar if needed) and enters the deal. */
+/** Starts a demo session (seeding the chosen deal if needed) and enters it. `?deal=messy` opens the Tidewater package:
+ *  thousands, reversed and missing years, revenue split across rows, promised documents absent. */
 export default function DemoPage() {
+  return <Suspense fallback={null}><DemoStarter /></Suspense>;
+}
+
+function DemoStarter() {
   const router = useRouter();
+  const which = useSearchParams().get("deal") === "messy" ? "messy" : "northstar";
   const [error, setError] = useState<{ reason: string; code: string | null } | null>(null);
   const [attempt, setAttempt] = useState(0);
   // React Strict Mode runs this effect twice in development; the ref lets both runs share one request instead of creating two sessions.
   const pending = useRef<Promise<Deal> | null>(null);
   useEffect(() => {
     let cancelled = false;
-    const request = (pending.current ??= api.post<Deal>("/api/demo/session"));
+    const request = (pending.current ??= api.post<Deal>(`/api/demo/session?deal=${which}`));
     request
       .then((d) => { if (!cancelled) router.replace(`/app/deals/${d.id}`); })
       .catch((e: unknown) => { if (!cancelled) setError(describe(e)); });
     return () => { cancelled = true; };
-  }, [router, attempt]);
+  }, [router, attempt, which]);
   const retry = () => { pending.current = null; setError(null); setAttempt((n) => n + 1); };
   return (
     <main id="main" data-world="ink" className="grid min-h-svh place-items-center bg-bg px-6 text-fg">
@@ -40,7 +46,7 @@ export default function DemoPage() {
         <EvidenceLinkMark size={32} animate className="mx-auto text-accent" />
         {!error ? (
           <div className="mt-4 text-sm text-fg-muted" aria-live="polite">
-            <p>Opening the fictional Northstar HVAC deal…</p>
+            <p>Opening the fictional {which === "messy" ? "Tidewater Plumbing" : "Northstar HVAC"} deal…</p>
             <p className="mt-1">The first visit can take a few seconds while the demo is seeded.</p>
           </div>
         ) : (

@@ -120,6 +120,54 @@ def seed_northstar(db: Session, user: User, fixtures_dir: Path | None = None, ge
     return deal
 
 
+def seed_messy(db: Session, user: User, generate_report_too: bool = True) -> Deal:
+    """Seed the second demo deal, Tidewater Plumbing: a messy package (thousands, reversed and missing years, revenue
+    split across rows, promised documents absent) so the demo shows BearCase stopping to ask. Files are built in
+    memory by fixtures/messy.py."""
+    from bearcase.api.routes.documents import store_document
+    from bearcase.fixtures import messy as M
+
+    deal = Deal(
+        owner_id=user.id,
+        company_name=M.COMPANY,
+        industry=M.INDUSTRY,
+        purchase_price=M.ENTERPRISE_VALUE,
+        purchase_price_basis=PurchasePriceBasis.ENTERPRISE_VALUE,
+        purchase_date=date.fromisoformat(M.PURCHASE_DATE),
+        debt_amount=M.FUNDED_DEBT,
+        equity_amount=M.EQUITY,
+        interest_rate_pct=M.INTEREST_RATE_PCT,
+        amortization_years=M.AMORTIZATION_YEARS,
+        payments_per_year=M.PAYMENTS_PER_YEAR,
+        covenant_dscr_threshold=M.COVENANT_DSCR,
+        is_demo=True,
+    )
+    db.add(deal)
+    db.flush()
+    record(db, deal_id=deal.id, user_id=user.id, event_type="deal.seeded", object_type="deal", object_id=deal.id, summary="Seeded the fictional Tidewater Plumbing demonstration deal (the messy package)")
+    for i, (kind, key) in enumerate(
+        [(ScenarioKind.BASE, "base"), (ScenarioKind.DOWNSIDE, "downside"), (ScenarioKind.SEVERE_DOWNSIDE, "severe_downside")]
+    ):
+        spec = N.SCENARIOS[key]
+        sc = Scenario(deal_id=deal.id, name=spec["name"], kind=kind, description=spec["description"], is_seed=True, sort_order=i)
+        db.add(sc)
+        db.flush()
+        for j, aspec in enumerate(ASSUMPTION_SPECS):
+            db.add(ScenarioAssumption(scenario_id=sc.id, key=aspec["key"], label=aspec["label"], value=Decimal(spec["assumptions"][aspec["key"]]), unit=ClaimUnit(aspec["unit"]), sort_order=j))
+    jobs: list[ProcessingJob] = []
+    for name, data in M.files():
+        doc = store_document(db, deal, user.id, name, None, data)
+        jobs.append(enqueue_job(db, deal_id=deal.id, job_type=JobType.PROCESS_DOCUMENT, document_id=doc.id))
+    jobs.append(enqueue_job(db, deal_id=deal.id, job_type=JobType.ANALYZE_DEAL))
+    if generate_report_too:
+        jobs.append(enqueue_job(db, deal_id=deal.id, job_type=JobType.GENERATE_REPORT))
+    db.flush()
+    for job in jobs:
+        _run_inline(db, job)
+    db.flush()
+    return deal
+
+
 def seed_for_demo_user(db: Session) -> Deal:
     from bearcase.auth import get_or_create_demo_user
 

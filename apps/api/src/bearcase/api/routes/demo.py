@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Request, Response, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -16,18 +16,26 @@ from bearcase.api.schemas import DealOut
 from bearcase.auth import create_demo_visitor, create_session, delete_deal_with_files, purge_stale_demo_users, resolve_session
 from bearcase.config import get_settings
 from bearcase.models import Deal
-from bearcase.seed import seed_northstar
+from bearcase.seed import seed_messy, seed_northstar
 
 log = logging.getLogger("bearcase.demo")
 router = APIRouter(prefix="/demo", tags=["demo"])
 
 
-def _latest_demo_deal(db: Session, owner_id: uuid.UUID) -> Deal | None:
-    return db.scalar(select(Deal).where(Deal.owner_id == owner_id, Deal.is_demo.is_(True)).order_by(Deal.created_at.desc()))
+DEMO_DEALS = {"northstar": ("Northstar", seed_northstar), "messy": ("Tidewater", seed_messy)}
+
+
+def _latest_demo_deal(db: Session, owner_id: uuid.UUID, which: str = "northstar") -> Deal | None:
+    prefix = DEMO_DEALS[which][0]
+    return db.scalar(
+        select(Deal)
+        .where(Deal.owner_id == owner_id, Deal.is_demo.is_(True), Deal.company_name.startswith(prefix))
+        .order_by(Deal.created_at.desc())
+    )
 
 
 @router.post("/session", response_model=DealOut, dependencies=[Depends(rate_limited)])
-def start_demo(db: DbDep, request: Request, response: Response) -> Deal:
+def start_demo(db: DbDep, request: Request, response: Response, deal: str = "northstar") -> Deal:
     """Open the caller's own demo.
 
     A caller with a live session, whether a returning demo visitor or a signed-in account, keeps that identity
@@ -50,21 +58,26 @@ def start_demo(db: DbDep, request: Request, response: Response) -> Deal:
     if user is None:
         user = create_demo_visitor(db)
         token = create_session(db, user)
-    deal = _latest_demo_deal(db, user.id) or seed_northstar(db, user)
+    if deal not in DEMO_DEALS:
+        raise HTTPException(400, "Unknown demo deal. Choose northstar or messy.")
+    found = _latest_demo_deal(db, user.id, deal) or DEMO_DEALS[deal][1](db, user)
     db.commit()
     if token:
         set_cookie(response, token)
-    return deal
+    return found
 
 
 @router.post("/reset", response_model=DealOut)
-def reset_demo(db: DbDep, user: UserDep) -> Deal:
-    """Re-seed the demo deal for the current user (previous demo deals are removed)."""
-    for old in list(db.scalars(select(Deal).where(Deal.owner_id == user.id, Deal.is_demo.is_(True)))):
+def reset_demo(db: DbDep, user: UserDep, deal: str = "northstar") -> Deal:
+    """Re-seed one demo deal for the current user (previous copies of that deal are removed)."""
+    if deal not in DEMO_DEALS:
+        raise HTTPException(400, "Unknown demo deal. Choose northstar or messy.")
+    prefix, seeder = DEMO_DEALS[deal]
+    for old in list(db.scalars(select(Deal).where(Deal.owner_id == user.id, Deal.is_demo.is_(True), Deal.company_name.startswith(prefix)))):
         delete_deal_with_files(db, old)
-    deal = seed_northstar(db, user)
+    fresh = seeder(db, user)
     db.commit()
-    return deal
+    return fresh
 
 
 @router.get("/deal-id")
