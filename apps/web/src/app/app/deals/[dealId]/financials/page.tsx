@@ -61,7 +61,7 @@ export default function FinancialsPage() {
       <div className="flex flex-col gap-6 p-4 md:p-6">
         <CheckWhatWeRead dealId={dealId} onCite={open} />
         <WhatChanged f={f} dealId={dealId} onOpen={setViewer} onDecide={setDecide} />
-        <Panel title="Add-back bridge: from the seller's number to the verified number" id="bridge">
+        <Panel title="Add-back bridge: from the seller's number to the checked number" id="bridge">
           <AddbackWaterfall steps={f.waterfall} sellerTotal={latest(f, "ebitda_adjusted_seller")?.value} />
           <Table caption="Seller adjustments and the decision on each" className="mt-4">
             <thead><tr><th className={th}>Adjustment</th><th className={`${th} text-right`}>Amount</th><th className={th}>Decision</th><th className={th}>Why</th><th className={th}>Evidence</th><th className={th}><span className="sr-only">Actions</span></th></tr></thead>
@@ -168,7 +168,7 @@ function CheckWhatWeRead({ dealId, onCite }: { dealId: string; onCite: (eid: str
                 {flagged.map((l) => <li key={l.key}>{LINE_LABEL.get(l.key) ?? l.key}{l.components ? `: summed from ${l.components.join(" + ")} because no total row exists` : ": matched by prefix only"}{Object.values(l.cells)[0]?.evidence_id && <button type="button" className="ml-2 text-xs text-accent hover:underline" onClick={() => onCite(Object.values(l.cells)[0]!.evidence_id!)}>open the rows</button>}</li>)}
               </ul>
             </div>
-          ) : <p className="text-sm text-fg-muted"><StatusGlyph status="supported" size={12} className="mr-1 inline align-middle" />Every line matched a row exactly; nothing was summed or guessed.</p>}
+          ) : <p className="text-sm text-fg-muted"><StatusGlyph status="supported" size={12} className="mr-1 inline align-middle" />Every line matched a row exactly and nothing was summed. Currency and scale come from the sheet&apos;s own labels{m.statements.some((s) => s.mapped && !s.currency_stated) ? "; this sheet states no currency, so dollars are assumed and shown as such" : ""}. A person has not confirmed these figures unless a correction or decision says so.</p>}
         </div>
         <div className="rounded-[var(--radius-2)] border border-hairline bg-bg-raised p-4">
           <p className="text-xs text-fg-muted">What was not checked</p>
@@ -303,7 +303,7 @@ function WhatChanged({ f, dealId, onOpen, onDecide }: { f: Financials; dealId: s
           <p className="mt-3 text-sm text-fg-muted">{accepted} of {f.adjustments.length} seller adjustments were accepted{excluded.length ? `; ${excluded.length} ${excluded.length === 1 ? "was" : "were"} excluded for the reasons listed here` : ""}. Decisions without a reviewer’s note are rule-based and provisional; recording your own decision recomputes the checked number and marks it reviewed.</p>
         </div>
         <div>
-          {excluded.length === 0 ? <p className="text-sm text-fg-muted">Every seller adjustment passed review, so the verified number equals the seller’s. The bridge below shows each step.</p> : (
+          {excluded.length === 0 ? <p className="text-sm text-fg-muted">Every seller adjustment passed the rules, so the checked number equals the seller’s. The bridge below shows each step.</p> : (
             <ol className="flex flex-col gap-2" aria-label="Excluded adjustments and reasons">
               {excluded.map((a) => (
                 <li key={a.id} className="rounded-[var(--radius-2)] border border-hairline p-3 text-sm">

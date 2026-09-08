@@ -24,7 +24,7 @@ const SEVERITY_ORDER = ["critical", "high", "medium", "low"];
 /** What each severity means for the buyer, as the group heading. */
 const SEVERITY_HEADING: Record<string, string> = { critical: "Ask before anything else", high: "Ask before you sign", medium: "Ask during the review", low: "Worth asking" };
 /** Where a question came from, in the words the overview uses for findings. */
-const KIND_LABEL: Record<string, string> = { contradiction: "Documents disagree", unsupported: "No evidence found", missing_document: "Document missing", covenant: "Loan coverage", concentration: "Customer concentration", risk: "Risk", integrity: "Document integrity" };
+const KIND_LABEL: Record<string, string> = { custom: "Written by the reviewer", contradiction: "Documents disagree", unsupported: "No evidence found", missing_document: "Document missing", covenant: "Loan coverage", concentration: "Customer concentration", risk: "Risk", integrity: "Document integrity" };
 const MAX_CHIPS = 4;
 const ACTION = "text-[11px] text-fg-muted underline-offset-2 hover:text-fg hover:underline";
 
@@ -75,6 +75,7 @@ export default function QuestionsPage() {
   const { toast } = useToast();
   const questions = useSellerQuestions(dealId);
   const replies = useSellerReplies(dealId);
+  const removeCustom = useMutation({ mutationFn: (id: string) => api.del(`/api/deals/${dealId}/seller-questions/custom/${id}`), onSuccess: () => { qc.invalidateQueries({ queryKey: wqk.sellerQuestions(dealId) }); toast({ title: "Question removed", tone: "success" }); } });
   const [replying, setReplying] = useState<string | null>(null);
   // Unchecked questions stay out of "Copy all"; everything is included until the user says otherwise.
   const [excluded, setExcluded] = useState<ReadonlySet<string>>(() => new Set());
@@ -120,7 +121,7 @@ export default function QuestionsPage() {
       <PageHeader kicker={kicker} title="Questions for the seller" actions={
         all.length > 0 && (
           <>
-            <Button variant="secondary" size="sm" icon={<Copy size={14} />} onClick={copyAll} aria-live="polite">{copied ? "Copied" : "Copy all"}</Button>
+            <Button variant="secondary" size="sm" icon={<Copy size={14} />} onClick={copyAll} aria-live="polite">{copied ? "Copied" : includedCount === all.length ? "Copy all" : `Copy selected (${includedCount})`}</Button>
             <Button variant="secondary" size="sm" icon={<Download size={14} />} onClick={() => download.mutate()} loading={download.isPending}>Download .md</Button>
           </>
         )
@@ -167,6 +168,7 @@ export default function QuestionsPage() {
                           <div className="mt-2 flex flex-wrap gap-x-3" role="group" aria-label={`Actions for question ${n}`}>
                             <button type="button" className={ACTION} onClick={() => draft(q)}>Draft with the assistant</button>
                             {q.claim_id && <Link href={`${base}/claims?claim=${q.claim_id}`} className={ACTION}>Open the claim</Link>}
+                            {q.kind === "custom" && <button type="button" className={`${ACTION} text-red`} onClick={() => removeCustom.mutate(q.id.split(":")[1])}>Remove</button>}
                             <button type="button" className={ACTION} onClick={() => setReplying(replying === q.id ? null : q.id)}>{replies.data?.replies[q.id] ? "Update the seller’s reply" : "Record the seller’s reply"}</button>
                           </div>
                           {replies.data?.replies[q.id] && replying !== q.id && <ReplyLine r={replies.data.replies[q.id]} />}

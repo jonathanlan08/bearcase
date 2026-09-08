@@ -360,6 +360,14 @@ class WaterfallStep(BaseModel):
     adjustment_id: uuid.UUID | None = None
 
 
+class CustomQuestionRequest(BaseModel):
+    question: str = Field(min_length=5, max_length=2000)
+    why: str | None = Field(default=None, max_length=2000)
+    severity: Literal["low", "medium", "high", "critical"] = "medium"
+    evidence_ids: list[uuid.UUID] = Field(default_factory=list, max_length=20)
+    source_message_id: uuid.UUID | None = None
+
+
 class SellerReplyRequest(BaseModel):
     question_id: str = Field(min_length=1, max_length=80)
     question_text: str = Field(min_length=1, max_length=2000)

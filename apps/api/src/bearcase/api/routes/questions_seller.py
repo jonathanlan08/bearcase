@@ -12,12 +12,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Response
 
 from bearcase.api.deps import EditorDealDep, DbDep, DealDep, UserDep
-from bearcase.api.schemas import SellerReplyRequest
+from bearcase.api.schemas import CustomQuestionRequest, SellerReplyRequest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bearcase.audit import record
-from bearcase.models import Deal, SellerReply
+from bearcase.models import Deal, SellerReply, CustomQuestion, Evidence
 from bearcase.reports.assemble import build_seller_questions
 
 router = APIRouter(tags=["seller-questions"])
@@ -189,3 +189,30 @@ def record_seller_reply(deal: EditorDealDep, body: SellerReplyRequest, db: DbDep
     )
     db.commit()
     return latest_replies(db, deal.id)[body.question_id]
+
+
+@router.post("/deals/{deal_id}/seller-questions/custom", status_code=201)
+def add_custom_question(deal: EditorDealDep, body: CustomQuestionRequest, db: DbDep, user: UserDep) -> dict[str, Any]:
+    """Save a question a person wrote or edited (often drafted with the assistant). It joins the generated list and
+    the export under "Written by the reviewer"; cited evidence must belong to this deal."""
+    if body.evidence_ids:
+        owned = {e for e in db.scalars(select(Evidence.id).where(Evidence.deal_id == deal.id, Evidence.id.in_(body.evidence_ids)))}
+        if owned != set(body.evidence_ids):
+            raise HTTPException(422, "An evidence id does not belong to this deal.")
+    row = CustomQuestion(deal_id=deal.id, user_id=user.id, question=body.question.strip(), why=(body.why or "").strip() or None, severity=body.severity, evidence_ids=[str(e) for e in body.evidence_ids], source_message_id=body.source_message_id)
+    db.add(row)
+    db.flush()
+    record(db, deal_id=deal.id, user_id=user.id, event_type="seller_question.added", object_type="custom_question", object_id=row.id, summary=f"Added a question for the seller: {row.question[:90]}", payload={"severity": row.severity, "from_chat": row.source_message_id is not None})
+    db.commit()
+    return {"id": f"custom:{row.id}", "question": row.question, "why": row.why, "severity": row.severity}
+
+
+@router.delete("/deals/{deal_id}/seller-questions/custom/{question_id}", status_code=204)
+def remove_custom_question(deal: EditorDealDep, question_id: uuid.UUID, db: DbDep, user: UserDep) -> Response:
+    row = db.scalar(select(CustomQuestion).where(CustomQuestion.id == question_id, CustomQuestion.deal_id == deal.id))
+    if row is None:
+        raise HTTPException(404, "Question not found.")
+    record(db, deal_id=deal.id, user_id=user.id, event_type="seller_question.removed", object_type="custom_question", object_id=row.id, summary=f"Removed the reviewer's question: {row.question[:90]}")
+    db.delete(row)
+    db.commit()
+    return Response(status_code=204)

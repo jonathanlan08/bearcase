@@ -19,8 +19,9 @@ UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 DECIMAL_REPR_RE = re.compile(r"\d\.\d{4,}|\d+E[+-]\d+|\bDecimal\(")
 MATERIAL_RE = re.compile(r"\d|\$|%")  # mirrors reports/validate.py
 # Baseline recorded in HANDOFF.md; change deliberately, never by accident. 36 while the provider drafted the
-# management questions; 43 since that section became the deterministic seller-question list (reports/assemble.py).
-NORTHSTAR_MATERIAL_STATEMENTS = 43
+# management questions; 43 when that section became the deterministic seller-question list; 41 since repeated
+# claim issues merge into one question (reports/assemble.py).
+NORTHSTAR_MATERIAL_STATEMENTS = 41
 
 
 def _report(client, demo) -> dict:

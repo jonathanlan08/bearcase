@@ -68,7 +68,7 @@ export default function ReportPage() {
       </PageHeader>
       {report.isPending && <div className="p-6"><Skeleton className="h-6 w-1/2" /><Skeleton className="mt-4 h-64" /></div>}
       {report.isError && <div className="p-6"><ErrorState detail={String(report.error)} onRetry={() => report.refetch()} /></div>}
-      {report.data === null && <div className="p-6"><EmptyState title="No report yet" body="Generate the investment-committee red-team review from the verified claims, financials, scenarios, and reviewer decisions." action={<Button onClick={() => generate.mutate()} loading={generate.isPending || running}>Generate report</Button>} /></div>}
+      {report.data === null && <div className="p-6"><EmptyState title="No report yet" body="Generate the investment-committee red-team review from the checked claims, financials, scenarios, and reviewer decisions." action={<Button onClick={() => generate.mutate()} loading={generate.isPending || running}>Generate report</Button>} /></div>}
       {r && (
         <div className="grid gap-6 p-4 md:p-6 lg:grid-cols-[180px_minmax(0,1fr)] 2xl:grid-cols-[180px_minmax(0,1fr)_260px]">
           <nav aria-label="Report sections" className="lg:sticky lg:top-4 lg:self-start">

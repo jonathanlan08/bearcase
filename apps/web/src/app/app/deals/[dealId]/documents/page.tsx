@@ -82,7 +82,7 @@ export default function DocumentsPage() {
         )}
         <input ref={fileRef} type="file" accept=".pdf,.xlsx,.csv" multiple className="sr-only" aria-label="Upload documents" onChange={(e) => { onFiles(e.target.files); e.target.value = ""; }} />
       </PageHeader>
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 p-4 md:p-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="flex flex-col gap-4 p-4 md:p-6">
         <div className="flex flex-col gap-4">
           <div role="button" tabIndex={0} aria-label="Drop PDF, XLSX, or CSV files here, or press Enter to choose files" onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") fileRef.current?.click(); }} onClick={() => fileRef.current?.click()} onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); onFiles(e.dataTransfer.files); }} className={`flex flex-col items-center justify-center rounded-[var(--radius-3)] border border-dashed px-6 py-8 text-center transition-colors duration-[120ms] ${drag ? "border-accent bg-accent/5" : "border-hairline"}`}>
             <Upload size={20} className="text-fg-muted" />
@@ -136,14 +136,22 @@ export default function DocumentsPage() {
             <Missing docs={docs.data ?? []} summary={summary.data ?? null} />
           </Panel>
         </div>
-        <Panel title="Processing" actions={live && <span className="text-xs font-medium text-amber" aria-live="polite">running</span>}>
-          {jobs.isPending && <Skeleton className="h-24" />}
-          {jobs.data && jobs.data.length === 0 && <p className="text-sm text-fg-muted">Nothing has been processed yet.</p>}
-          {analyzeJob?.status === "failed" && <p className="mb-3 rounded-[var(--radius-2)] border border-red/40 p-2 text-xs text-red">Analysis failed: {analyzeJob.error}</p>}
-          <ul className="flex flex-col divide-y divide-hairline">
-            {(jobs.data ?? []).slice(0, 12).map((j) => <JobRow key={j.id} job={j} name={docs.data?.find((d) => d.id === j.document_id)?.display_name} />)}
-          </ul>
-        </Panel>
+        <details className="group rounded-[var(--radius-3)] border border-hairline bg-bg-raised" open={live || (jobs.data ?? []).some((j) => j.status === "failed")}>
+          <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-5 py-3 text-sm [&::-webkit-details-marker]:hidden">
+            <span className="font-medium">Processing</span>
+            <span className="text-fg-muted">{jobs.data ? `${jobs.data.filter((j) => j.status === "succeeded").length} finished${jobs.data.some((j) => j.status === "failed") ? `, ${jobs.data.filter((j) => j.status === "failed").length} failed` : ""}${live ? ", running now" : ""}` : "loading"}</span>
+            {live && <span className="text-xs font-medium text-amber" aria-live="polite">running</span>}
+            <span className="ml-auto text-xs text-accent">details</span>
+          </summary>
+          <div className="border-t border-hairline p-4">
+            {jobs.isPending && <Skeleton className="h-24" />}
+            {jobs.data && jobs.data.length === 0 && <p className="text-sm text-fg-muted">Nothing has been processed yet.</p>}
+            {analyzeJob?.status === "failed" && <p className="mb-3 rounded-[var(--radius-2)] border border-red/40 p-2 text-xs text-red">Analysis failed: {analyzeJob.error}</p>}
+            <ul className="flex flex-col divide-y divide-hairline">
+              {(jobs.data ?? []).slice(0, 12).map((j) => <JobRow key={j.id} job={j} name={docs.data?.find((d) => d.id === j.document_id)?.display_name} />)}
+            </ul>
+          </div>
+        </details>
       </div>
       <DocumentViewer dealId={dealId} target={viewer} onClose={() => setViewer(null)} />
       <DeleteDialog doc={toDelete} pending={remove.isPending} onCancel={() => setToDelete(null)} onConfirm={() => { if (toDelete) remove.mutate(toDelete.id); }} />

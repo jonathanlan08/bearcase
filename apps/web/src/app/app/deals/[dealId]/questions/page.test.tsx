@@ -88,7 +88,7 @@ describe("Questions for the seller", () => {
     fireEvent.click(boxes[1]);
     expect(boxes[1]).not.toBeChecked();
     expect(screen.getByText(/ticked\./)).toHaveTextContent("2 of 3 ticked");
-    const copy = screen.getByRole("button", { name: "Copy all" });
+    const copy = screen.getByRole("button", { name: /^Copy (all|selected)/ });
     await act(async () => { fireEvent.click(copy); await Promise.resolve(); });
     expect(writeText).toHaveBeenCalledTimes(1);
     const text = writeText.mock.calls[0][0] as string;
@@ -145,7 +145,7 @@ describe("Questions for the seller", () => {
     renderPage();
     expect(await screen.findByText("No questions yet")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open the Deal Room" })).toHaveAttribute("href", "/app/deals/d1/documents");
-    expect(screen.queryByRole("button", { name: "Copy all" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Copy (all|selected)/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Download .md" })).toBeNull();
   });
 });

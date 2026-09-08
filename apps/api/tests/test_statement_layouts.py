@@ -75,3 +75,13 @@ def test_total_row_wins_over_components() -> None:
 def test_numbers_in_titles_do_not_imply_scale() -> None:
     s = _mapped([["Northstar HVAC statements, 10000 Main St"], ["Line item", "FY2023", "FY2024"], ["Revenue", "5", "6"]])
     assert s is not None and s.scale == 1 and s.lines["FY2024"]["revenue"].value == Decimal("6")
+
+
+def test_currency_is_stated_or_assumed() -> None:
+    from bearcase.ingest.statement_mapper import detect_currency
+
+    stated = _mapped([["Income statement (USD)"], ["Line item", "FY2023", "FY2024"], ["Revenue", "1", "2"]])
+    assert stated is not None and stated.currency == "USD"
+    silent = _mapped([["Income statement"], ["Line item", "FY2023", "FY2024"], ["Revenue", "1", "2"]])
+    assert silent is not None and silent.currency is None
+    assert detect_currency("Statement of income, in EUR thousands") == "EUR"

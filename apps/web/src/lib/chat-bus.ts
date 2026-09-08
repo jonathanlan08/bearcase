@@ -25,7 +25,7 @@ import { useSyncExternalStore } from "react";
  *   citations, and no instructions for the model beyond what the user would type.
  */
 
-export interface ChatPrompt { readonly id: number; readonly text: string; readonly send: boolean }
+export interface ChatPrompt { readonly id: number; readonly text: string; readonly send: boolean; readonly context?: string }
 export interface ChatBusState { readonly open: boolean; readonly prompt: ChatPrompt | null }
 
 /** Mirrors `ChatRequest.message` max_length in `api/routes/chat.py`. */
@@ -58,11 +58,11 @@ export function onChatPrompt(cb: (p: ChatPrompt) => void): () => void {
 }
 
 /** Open the panel with a prompt. `send: true` sends it immediately; otherwise it is prefilled for the user to finish. */
-export function askTheDeal(prompt: string, opts: { send?: boolean } = {}): void {
+export function askTheDeal(prompt: string, opts: { send?: boolean; context?: string } = {}): void {
   const text = prompt.trim().slice(0, CHAT_PROMPT_MAX);
   if (!text) { commit({ open: true, prompt: state.prompt }); return; }
   seq += 1;
-  commit({ open: true, prompt: { id: seq, text, send: opts.send === true } });
+  commit({ open: true, prompt: { id: seq, text, send: opts.send === true, context: opts.context } });
 }
 
 /** Open or close the panel. Closing drops a prompt the panel has not taken. */

@@ -1,5 +1,7 @@
 "use client";
 
+import { CommandPalette } from "@/components/app/command-palette";
+
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useLocalFlag } from "@/lib/hooks";
@@ -65,6 +67,7 @@ export function DealShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-svh">
+      <CommandPalette />
       <aside className={`sticky top-0 hidden h-svh shrink-0 flex-col border-r border-hairline bg-bg-raised transition-[width] duration-200 md:flex ${collapsed ? "w-14" : "w-[232px]"}`} aria-label="Deal navigation">
         <div className="flex h-14 items-center justify-between px-3">
           <Link href="/app" className="rounded-[var(--radius-1)]">{collapsed ? <Wordmark className="[&>span:last-child]:hidden" /> : <Wordmark />}</Link>
@@ -90,6 +93,7 @@ export function DealShell({ children }: { children: React.ReactNode }) {
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
         </div>
+        {!collapsed && <button type="button" onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))} className="mx-2 mt-3 flex h-8 items-center gap-2 rounded-[var(--radius-2)] border border-hairline px-2 text-left text-xs text-fg-muted hover:bg-bg-muted" aria-label="Find anything (Command K)"><span className="flex-1">Find anything</span><kbd className="font-mono text-[10px]">⌘K</kbd></button>}
         <nav className="mt-3 flex flex-col gap-0.5 px-2">
           {PRIMARY.map((n) => <NavLink key={n.key} href={`${base}/${n.key}`} label={n.label} Icon={n.Icon} active={isActive(n.key)} />)}
           <div className="my-2 h-px bg-hairline" />
@@ -99,7 +103,7 @@ export function DealShell({ children }: { children: React.ReactNode }) {
           {!collapsed && chatConfig.data && (
             <p className="truncate px-1 text-[11px] text-fg-muted">Assistant: {chatConfig.data.live ? chatConfig.data.label : "offline, rule-based"}</p>
           )}
-          {!collapsed && deal.data?.is_demo && <p className="text-[11px] leading-snug text-fg-muted">Northstar HVAC is fictional. Not financial, legal, tax, or investment advice.</p>}
+          {!collapsed && deal.data?.is_demo && <p className="text-[11px] leading-snug text-fg-muted">{(deal.data.company_name ?? "This deal").split(",")[0]} is fictional. Not financial, legal, tax, or investment advice.</p>}
           <Link href="/trust" className="flex h-8 items-center gap-2 rounded-[var(--radius-1)] px-1 text-xs text-fg-muted hover:bg-bg-muted hover:text-fg" title={collapsed ? "Trust & data" : undefined} aria-label={collapsed ? "Trust & data" : undefined}><ShieldCheck size={14} />{!collapsed && "Trust & data"}</Link>
           {!collapsed && (
             <p className="flex flex-wrap gap-x-2 px-1 text-[11px] text-fg-muted">
@@ -166,9 +170,9 @@ export function VerifyBanner({ email }: { email: string }) {
   );
 }
 
-export function PageHeader({ title, kicker, actions, children }: { title: string; kicker?: string; actions?: React.ReactNode; children?: React.ReactNode }) {
+export function PageHeader({ title, kicker, actions, children, className = "" }: { title: string; kicker?: string; actions?: React.ReactNode; children?: React.ReactNode; className?: string }) {
   return (
-    <div className="border-b border-hairline bg-bg px-4 py-5 md:px-6">
+    <div className={`${className} border-b border-hairline bg-bg px-4 py-5 md:px-6`}>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           {kicker && <p className="text-sm text-fg-muted">{kicker}</p>}

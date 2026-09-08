@@ -20,7 +20,7 @@ from bearcase.chat.providers import (
 )
 from bearcase.chat.service import stream_reply
 from bearcase.config import get_settings
-from bearcase.models import ChatMessage, ChatThread
+from bearcase.models import ChatMessage, ChatThread, FinancialMetric, Evidence
 from bearcase.models.base import utcnow
 
 router = APIRouter(tags=["chat"])
@@ -88,8 +88,29 @@ def _thread_out(t: ChatThread) -> dict:
     }
 
 
-def _message_out(m) -> dict:  # type: ignore[no-untyped-def]
+def _stale(db: Session, deal_id: uuid.UUID, m) -> bool:  # type: ignore[no-untyped-def]
+    """An assistant reply is stale when a metric it cited no longer exists (the deal was re-analysed or corrected)
+    or an evidence row it cited belongs to an earlier version of its document."""
+    c = m.citations or {}
+    for mm in c.get("metrics") or []:
+        try:
+            if db.scalar(select(FinancialMetric.id).where(FinancialMetric.id == uuid.UUID(mm["id"]), FinancialMetric.deal_id == deal_id)) is None:
+                return True
+        except (KeyError, ValueError):
+            continue
+    for ee in c.get("evidence") or []:
+        try:
+            e = db.get(Evidence, uuid.UUID(ee["id"]))
+        except (KeyError, ValueError):
+            continue
+        if e is None or (e.document_version_id and e.document.current_version_id and e.document_version_id != e.document.current_version_id):
+            return True
+    return False
+
+
+def _message_out(m, stale: bool = False) -> dict:  # type: ignore[no-untyped-def]
     return {
+        "stale": stale,
         "id": str(m.id),
         "role": m.role,
         "content": m.content,
@@ -164,7 +185,7 @@ def thread(deal: DealDep, thread_id: uuid.UUID, db: DbDep, user: UserDep) -> dic
     )
     if t is None:
         raise HTTPException(404, "Thread not found.")
-    return {**_thread_out(t), "messages": [_message_out(m) for m in t.messages]}
+    return {**_thread_out(t), "messages": [_message_out(m, _stale(db, deal.id, m) if m.role == "assistant" else False) for m in t.messages]}
 
 
 @router.delete("/deals/{deal_id}/chat/threads/{thread_id}", status_code=204)

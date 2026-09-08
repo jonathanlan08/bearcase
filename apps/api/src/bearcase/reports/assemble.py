@@ -122,6 +122,7 @@ DOC_TYPE_LABELS = {
     "customer_contract": "customer contract",
 }
 FINDING_KIND_LABELS = {
+    "custom": "Written by the reviewer",
     FindingKind.CONTRADICTION: "Contradiction",
     FindingKind.UNSUPPORTED_ASSUMPTION: "Unsupported assumption",
     FindingKind.MISSING_DOCUMENT: "Missing document",
@@ -355,7 +356,7 @@ def _question_for_finding(
         # Figure-free on purpose: the reason carries the coverage numbers, the metric id lets a reader open them.
         scenario = _humanize(f.key.removeprefix("covenant:")).lower()
         lead = (
-            f"In our {scenario} scenario the cash flow does not cover the loan payments the lender requires."
+            f"In our {scenario} scenario the cash flow falls short of the coverage the lender requires."
             if " breaks " in f.title  # analyze.py titles a breach "… breaks the debt coverage covenant"
             else f"In our {scenario} scenario the cash flow covers the loan payments with little room to spare."
         )
@@ -412,6 +413,7 @@ def build_seller_questions(db: Session, deal: Deal) -> dict[str, Any]:
                     "metric_ids": [str(m) for m in f.metric_ids],
                     "claim_id": str(claim.id) if claim is not None else None,
                     "finding_id": str(f.id),
+                    "also_claim_ids": [],
                     "document_names": _document_names(evidence_ids, index, claim.document if claim is not None else None),
                 },
             )
@@ -440,7 +442,48 @@ def build_seller_questions(db: Session, deal: Deal) -> dict[str, Any]:
                     "metric_ids": [str(c.verified_metric_id)] if c.verified_metric_id else [],
                     "claim_id": str(c.id),
                     "finding_id": None,
+                    "also_claim_ids": [],
                     "document_names": _document_names(evidence_ids, index, c.document),
+                },
+            )
+        )
+    rows.sort(key=lambda r: r[0])
+    # One request per issue: a claim the seller repeats in several documents (the same type and status) becomes one
+    # question that lists every source, instead of one question per occurrence.
+    merged: list[tuple[Any, dict[str, Any]]] = []
+    seen: dict[tuple[str, str], dict[str, Any]] = {}
+    claim_by_id = {str(c.id): c for c in claims}
+    for key, q in rows:
+        c = claim_by_id.get(q["claim_id"] or "")
+        sig = (c.claim_type.value, _effective_status(c)) if (c is not None and q["kind"] in ("contradiction", "unsupported")) else None
+        if sig and sig in seen:
+            first = seen[sig]
+            first["evidence_ids"] = list(dict.fromkeys([*first["evidence_ids"], *q["evidence_ids"]]))
+            first["document_names"] = list(dict.fromkeys([*first["document_names"], *q["document_names"]]))
+            first["also_claim_ids"] = [*first.get("also_claim_ids", []), q["claim_id"]]
+            continue
+        if sig:
+            seen[sig] = q
+        merged.append((key, q))
+    rows = merged
+    from bearcase.models import CustomQuestion
+
+    for cq in db.scalars(select(CustomQuestion).where(CustomQuestion.deal_id == deal.id).order_by(CustomQuestion.created_at)):
+        rows.append(
+            (
+                (SEVERITY_RANK.get(cq.severity, 2), len(QUESTION_KIND_ORDER), cq.created_at, str(cq.id)),
+                {
+                    "id": f"custom:{cq.id}",
+                    "question": cq.question,
+                    "why": cq.why or "Written by the reviewer.",
+                    "kind": "custom",
+                    "severity": cq.severity,
+                    "evidence_ids": [str(e) for e in (cq.evidence_ids or [])],
+                    "metric_ids": [],
+                    "claim_id": None,
+                    "finding_id": None,
+                    "also_claim_ids": [],
+                    "document_names": _document_names([str(e) for e in (cq.evidence_ids or [])], index),
                 },
             )
         )

@@ -47,8 +47,9 @@ QUESTION_KEYS = {
     "claim_id",
     "finding_id",
     "document_names",
+    "also_claim_ids",
 }
-KINDS = {"contradiction", "unsupported", "missing_document", "covenant", "concentration", "risk", "integrity"}
+KINDS = {"contradiction", "unsupported", "missing_document", "covenant", "concentration", "risk", "integrity", "custom"}
 SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 DEAL_BODY = {
     "company_name": "Progress Co",
@@ -130,7 +131,7 @@ def test_seller_questions_are_deterministic_and_reader_ready(owner):
     data = first.json()
     qs = data["questions"]
     assert len(qs) >= 8 and data["generated_from"]["findings"] >= 8 and data["generated_from"]["claims"] >= 5
-    assert len(qs) == 21, "the landing page states this count (apps/web/src/app/page.tsx DEMO.questions); update both"
+    assert len(qs) == 19, "the landing page states this count (apps/web/src/app/page.tsx DEMO.questions); update both"
     for q in qs:
         assert set(q) == QUESTION_KEYS, q
         assert q["kind"] in KINDS and q["severity"] in SEVERITY_RANK

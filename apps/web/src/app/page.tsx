@@ -32,7 +32,7 @@ const DEMO = {
   sellerEbitda: fmtMoney(S.ebitda.seller, { compact: true }),
   verifiedEbitda: fmtMoney(S.ebitda.verified, { compact: true }),
   covenant: fmtX(S.deal.threshold),
-  questions: 21, // seller questions the Northstar demo exports; test_first_customer.py asserts this count
+  questions: 19, // seller questions the Northstar demo exports (repeated issues merged); test_first_customer.py asserts this count
 };
 const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
 const word = (n: number) => WORDS[n] ?? String(n);

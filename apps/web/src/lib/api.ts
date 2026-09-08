@@ -104,7 +104,7 @@ export interface CorrectionImpact { metrics: { key: string; period: string; labe
 export interface Correction { id: string; line_key: string; period_label: string; original_value: string | null; corrected_value: string; note: string | null; by: string | null; created_at: string; impact: CorrectionImpact }
 export interface MappedCell { value: string; raw: string; cell: string; confidence: number; evidence_id: string | null; correction: Correction | null }
 export interface MappedLine { key: string; cells: Record<string, MappedCell>; components: string[] | null; needs_review: boolean }
-export interface MappedStatement { document_id: string; document_name: string; mapped: boolean; reason?: string; sheet?: string; header_row?: number | null; scale?: number; currency?: string; periods?: { label: string; year: number | null }[]; lines?: MappedLine[]; unmapped_rows?: { row: number; label: string }[] }
+export interface MappedStatement { document_id: string; document_name: string; mapped: boolean; reason?: string; sheet?: string; header_row?: number | null; scale?: number; currency?: string; currency_stated?: boolean; periods?: { label: string; year: number | null }[]; lines?: MappedLine[]; unmapped_rows?: { row: number; label: string }[] }
 export interface Coverage { documents_ready: number; documents_failed: number; documents_pending: number; statements_mapped: number; statements_unmapped: number; unmapped_rows: number; ambiguous_lines: number; metrics_requiring_review: number; claims_by_status: Record<string, number> }
 export interface StatementMapping { statements: MappedStatement[]; coverage: Coverage }
 /** The review inbox (api/routes/insights.py review_queue): what a person still has to decide, grouped. */

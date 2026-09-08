@@ -15,7 +15,7 @@ import { ACTION_VERB, CorrectionDialog, useReview } from "@/components/domain/re
 import { fmtLocator, fmtValue, fmtDateTime, titleCase } from "@/lib/format";
 import { useMediaQuery } from "@/lib/hooks";
 import { askTheDeal } from "@/lib/chat-bus";
-import { api, type Claim, type ClaimDetail, type Link as EvLink } from "@/lib/api";
+import { api, type Claim, type ClaimDetail, type Link as EvLink, type Metric } from "@/lib/api";
 
 const STATUSES = ["supported", "contradicted", "review_required", "unsupported"] as const;
 
@@ -84,9 +84,15 @@ export default function ClaimsPage() {
 
   const d = detail.data;
   const current = d?.decisions.find((x) => x.is_current);
+  // The continuous review: after this claim, the next one in the list that still needs a person (disputed and undecided).
+  const nextUnresolved = useMemo(() => {
+    const i = list.findIndex((c) => c.id === selected);
+    const needs = (c: Claim) => ["contradicted", "review_required", "unsupported"].includes(c.effective_status) && !c.decisions.some((x) => x.is_current);
+    return [...list.slice(i + 1), ...list.slice(0, Math.max(0, i))].find(needs) ?? null;
+  }, [list, selected]);
   return (
     <div className="flex min-h-[calc(100svh-0px)] flex-col">
-      <PageHeader kicker={kicker} title="Claim Audit">
+      <PageHeader kicker={kicker} title="Claim Audit" className={selected && d ? "hidden lg:block" : ""}>
         <p className="mt-2 max-w-3xl text-sm text-fg-muted">The factual claims the reader found in the seller’s documents, each checked against the other documents. It can miss claims and misread others, so open a claim, read the evidence, then record what you decide.</p>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <div className="flex flex-wrap gap-1" role="group" aria-label="Filter by status">
@@ -109,8 +115,13 @@ export default function ClaimsPage() {
         <div className={`min-w-0 ${!selected || !d ? "hidden lg:block" : ""}`}>
           {selected && detail.isPending && <div className="p-4"><Skeleton className="h-40" /></div>}
           {d && (
-            <div className="flex flex-col gap-5 p-4 md:p-6">
-              <button type="button" className="flex items-center gap-1 text-sm text-fg-muted lg:hidden" onClick={() => setSelected(null)}><ArrowLeft size={14} /> Back to list</button>
+            <div className="flex flex-col gap-5 p-4 pb-28 md:p-6 md:pb-6">
+              <div className="flex items-center gap-2 lg:hidden">
+                <button type="button" className="flex items-center gap-1 text-sm text-fg-muted" onClick={() => setSelected(null)}><ArrowLeft size={14} /> List</button>
+                <span className="num ml-auto text-xs text-fg-muted">{list.findIndex((c) => c.id === selected) + 1} of {list.length}</span>
+                <Button size="sm" variant="secondary" onClick={() => move(-1)} aria-label="Previous claim">Prev</Button>
+                <Button size="sm" variant="secondary" onClick={() => move(1)} aria-label="Next claim">Next</Button>
+              </div>
               <div>
                 <div className="flex flex-wrap items-center gap-2"><StatusChip status={d.effective_status} />{current && d.effective_status !== d.status && <span className="text-xs text-fg-muted">reviewer decision (AI said <StatusChip status={d.status} size="sm" />)</span>}<span className="ml-auto text-xs text-fg-muted">{titleCase(d.claim_type)}{d.period_label ? `, ${d.period_label}` : ""}</span></div>
                 <p className="mt-3 text-lg leading-snug">{d.claim_text}</p>
@@ -143,15 +154,16 @@ export default function ClaimsPage() {
                     <Button size="sm" variant="secondary" icon={<Pencil size={14} />} onClick={() => setDialog("correct")}>Correct…</Button>
                     <Button size="sm" variant="danger" icon={<X size={14} />} onClick={() => setDialog("reject")}>Reject…</Button>
                     {current && <Button size="sm" variant="ghost" icon={<Undo2 size={14} />} onClick={() => decide("undo")}>Undo</Button>}
+                    {nextUnresolved && <Button size="sm" variant="primary" onClick={() => setSelected(nextUnresolved.id)}>Next unresolved</Button>}
                   </div>
                 </div>
                 <p className="mt-2 text-xs text-fg-muted">Confirm records that you agree with the AI&apos;s assessment, <span className="font-medium text-fg">{STATUS_LABEL[d.status]}</span> ({STATUS_MEANING[d.status] ?? "see the rationale above"}). Correct or reject when you disagree; each adds an entry under your name and the original AI output stays unchanged.</p>
                 <div className="mt-3 flex flex-wrap gap-2 border-t border-hairline pt-3">
                   <Button size="sm" variant="ghost" icon={<ExternalLink size={14} />} onClick={() => jumpToSource(d)} disabled={!d.source_evidence}>Jump to source</Button>
-                  <Button size="sm" variant="ghost" icon={<MessageSquareText size={14} />} onClick={() => askTheDeal(askPrompt(d))}>Ask about this claim</Button>
+                  <Button size="sm" variant="ghost" icon={<MessageSquareText size={14} />} onClick={() => askTheDeal(askPrompt(d), { context: `Claim: ${d.claim_text.slice(0, 80)}` })}>Ask about this claim</Button>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2" aria-label="Questions about this claim">
-                  {CONTEXT_PROMPTS.map(([label, build]) => <Button key={label} size="sm" variant="secondary" onClick={() => askTheDeal(build(d), { send: true })}>{label}</Button>)}
+                  {CONTEXT_PROMPTS.map(([label, build]) => <Button key={label} size="sm" variant="secondary" onClick={() => askTheDeal(build(d), { send: true, context: `Claim: ${d.claim_text.slice(0, 80)}` })}>{label}</Button>)}
                 </div>
                 {d.decisions.length > 0 && (
                   <ol className="mt-3 flex flex-col gap-1.5 border-t border-hairline pt-3 text-sm" aria-label="Decision history">
@@ -179,17 +191,47 @@ const CONTEXT_PROMPTS: Array<[string, (d: ClaimDetail) => string]> = [
   ["What would resolve this?", (d) => `What document or figure from the seller would settle this claim one way or the other, and how should I word the request?\nClaim: "${d.claim_text}"\nStatus: ${STATUS_LABEL[d.effective_status]}.`],
 ];
 
+const INPUT_LABEL: Record<string, string> = { first_period_revenue: "Starting revenue", last_period_revenue: "Ending revenue", years: "Elapsed time", current_period_revenue: "This year's revenue", prior_period_revenue: "Prior year's revenue", revenue: "Revenue", cost_of_goods_sold: "Cost of goods sold", operating_income: "Operating income", net_income: "Net income", interest_expense: "Interest expense", income_tax_expense: "Income tax", depreciation: "Depreciation", amortization: "Amortization", ebitda: "EBITDA", reported_ebitda: "Reported EBITDA", accepted_addbacks: "Accepted add-backs", top_customer_revenue: "Largest customer's revenue", total_revenue: "Total revenue", recurring_revenue: "Recurring revenue" };
+
+/** A figure from a calculation's snapshot, formatted for a reader: years as years, percentages as percentages, everything else as money. */
+function fmtInput(key: string, v: string | number, unit: string): string {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return String(v);
+  if (/year/.test(key)) return `${n} ${n === 1 ? "year" : "years"}`;
+  if (/pct|margin|share|rate/.test(key)) return fmtValue(String(v), "pct");
+  if (unit === "pct" || unit === "usd" || unit === "multiple" || unit === "ratio") return fmtValue(String(v), "usd");
+  return fmtValue(String(v), unit as never);
+}
+
+/** One sentence that substitutes the inputs into the formula, for the calculations a buyer meets first. */
+function workedExample(m: Metric, inputs: Array<[string, string | number]>): string | null {
+  const get = (k: string) => inputs.find(([kk]) => kk === k)?.[1];
+  const money = (v: string | number | undefined) => (v === undefined ? "?" : fmtValue(String(v), "usd"));
+  const out = fmtValue(m.value, m.unit);
+  switch (m.key) {
+    case "cagr": return `${money(get("first_period_revenue"))} starting revenue → ${money(get("last_period_revenue"))} ending revenue over ${get("years") ?? "?"} years → ${out} a year.`;
+    case "revenue_growth": return `${money(get("prior_period_revenue"))} last year → ${money(get("current_period_revenue"))} this year → ${out} growth.`;
+    case "gross_margin": return `(${money(get("revenue"))} revenue − ${money(get("cost_of_goods_sold"))} cost of goods sold) ÷ revenue → ${out}.`;
+    case "operating_margin": return `${money(get("operating_income"))} operating income ÷ ${money(get("revenue"))} revenue → ${out}.`;
+    case "ebitda_reported": return `${money(get("net_income"))} net income + interest, taxes, depreciation, and amortization → ${out}.`;
+    case "customer_concentration_top1": return `${money(get("top_customer_revenue"))} from the largest customer ÷ ${money(get("total_revenue"))} total → ${out}.`;
+    case "recurring_revenue_pct": return `${money(get("recurring_revenue"))} under contract ÷ ${money(get("total_revenue"))} total → ${out}.`;
+    default: return m.formula ? `${m.formula.replace(/_/g, " ")} → ${out}.` : null;
+  }
+}
+
 /** The answer trace: source → extracted value → calculation → conclusion, each step openable. The one interaction that
  *  shows a reader where a status came from without reading the whole page. */
 function AnswerTrace({ d, onOpen, onSource }: { d: ClaimDetail; onOpen: (eid: string) => void; onSource: () => void }) {
   const m = d.verified_metric;
   const contradicting = d.links.filter((l) => l.role === "contradicting");
   const supporting = d.links.filter((l) => l.role === "supporting");
-  const inputs = m ? Object.entries(m.input_snapshot).filter(([k]) => !["sheet", "cell", "row", "document_id", "scale", "components"].includes(k)) : [];
+  const inputs = m ? Object.entries(m.input_snapshot).filter(([k, v]) => !["sheet", "cell", "row", "document_id", "scale", "components", "corrected", "correction_id", "mapped_value", "correction_note", "scenario_result_id"].includes(k) && (typeof v === "string" || typeof v === "number")) : [];
+  const worked = m ? workedExample(m, inputs as Array<[string, string | number]>) : null;
   const steps: Array<{ label: string; body: React.ReactNode }> = [
     { label: "Source", body: <>{d.source_evidence ? <>The claim is a sentence in <button type="button" className="text-accent hover:underline" onClick={onSource}>{d.document_name}{fmtLocator(d.source_evidence.locator) ? `, ${fmtLocator(d.source_evidence.locator)}` : ""}</button>.</> : "No source location was recorded for this claim."}{d.claimed_value !== null && <> The seller&apos;s figure: <span className="num font-medium">{fmtValue(d.claimed_value, d.claimed_unit)}</span>.</>}</> },
     { label: "What the documents hold", body: (contradicting.length + supporting.length) === 0 ? "No document in the deal room speaks to this claim, which is why it cannot be supported." : <ul className="space-y-1">{[...contradicting, ...supporting].slice(0, 4).map((l) => <li key={l.evidence.id}><button type="button" className="text-left hover:underline" onClick={() => onOpen(l.evidence.id)}><span className="font-medium">{l.evidence.document_name}</span>{fmtLocator(l.evidence.locator) ? `, ${fmtLocator(l.evidence.locator)}` : ""}</button>{l.role === "contradicting" && <span className="ml-2 text-xs text-red">contradicts</span>}{l.note && <span className="block text-xs text-fg-muted">{l.note}</span>}</li>)}</ul> },
-    { label: "Calculation", body: m ? <>{m.formula ? <p className="font-mono text-xs">{m.formula}</p> : <p>Read directly from the cell; no arithmetic.</p>}{inputs.length > 0 && <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">{inputs.map(([k, v]) => <Fragment key={k}><dt className="font-mono text-fg-muted">{k}</dt><dd className="num">{String(v)}</dd></Fragment>)}</dl>}<p className="mt-1 text-xs text-fg-muted">Computed by the deterministic engine from the mapped statements; the model never calculates. Result: <span className="num font-medium text-fg">{fmtValue(m.value, m.unit)}</span>.</p></> : "No calculation is involved; the status rests on the documents above." },
+    { label: "Calculation", body: m ? <>{worked ? <p>{worked}</p> : <p>Read directly from the cell; no arithmetic.</p>}{inputs.length > 0 && <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm">{inputs.map(([k, v]) => <Fragment key={k}><dt className="text-fg-muted">{INPUT_LABEL[k] ?? k.replace(/_/g, " ")}</dt><dd className="num">{fmtInput(k, v as string | number, m.unit)}</dd></Fragment>)}</dl>}<p className="mt-1 text-xs text-fg-muted">Result: <span className="num font-medium text-fg">{fmtValue(m.value, m.unit)}</span>. Computed by code from the mapped statements, never by the model.</p><details className="mt-1 text-xs text-fg-muted"><summary className="cursor-pointer">Technical details</summary>{m.formula && <p className="mt-1 font-mono">{m.formula}</p>}<pre className="mt-1 overflow-x-auto rounded-[var(--radius-1)] bg-bg-muted p-2 font-mono text-[11px]">{JSON.stringify(m.input_snapshot, null, 1)}</pre></details></> : "No calculation is involved; the status rests on the documents above." },
     { label: "Conclusion", body: <><span className="font-medium">{STATUS_LABEL[d.status]}</span>{d.status_rule && <span className="ml-2 font-mono text-[11px] text-fg-muted">rule {d.status_rule.replace(/_/g, " ")}</span>}<p className="mt-1">{d.status_rationale ?? "No rationale recorded."}</p></> },
   ];
   return (

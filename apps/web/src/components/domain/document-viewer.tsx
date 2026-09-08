@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Dialog } from "radix-ui";
 import { X } from "lucide-react";
-import { reportEvidenceOpened, useDocEvidence } from "@/components/app/hooks";
+import { reportEvidenceOpened, useDocEvidence, useEvidence } from "@/components/app/hooks";
 import { Skeleton } from "@/components/ui/primitives";
 import { fmtCell, fmtLocator } from "@/lib/format";
 import type { Evidence } from "@/lib/api";
@@ -27,7 +27,18 @@ export function DocumentViewer({ dealId, target, onClose }: { dealId: string; ta
 const NUMERIC = /^-?\d+(\.\d+)?$/;
 const MONEY_COLUMN = /revenue|amount|total|value|price|sales|cost|fee|balance/i;
 
-function ViewerBody({ dealId, target }: { dealId: string; target: ViewerTarget }) {
+/** A target that names only an evidence id (a citation chip, the answer trace) is resolved to its document first, so
+ *  no entry point can leave the drawer loading a query that will never run. */
+function ViewerBody({ dealId, target: given }: { dealId: string; target: ViewerTarget }) {
+  const needsLookup = !given.documentId && !!given.evidenceId;
+  const lookup = useEvidence(dealId, needsLookup ? given.evidenceId ?? null : null);
+  if (needsLookup && lookup.isPending) return <div className="p-4"><Skeleton className="h-6 w-1/2" /><Skeleton className="mt-3 h-40" /></div>;
+  if (needsLookup && (lookup.isError || !lookup.data)) return <div className="p-4 text-sm"><p className="font-medium">This source could not be opened.</p><p className="mt-1 text-fg-muted">The cited evidence row no longer exists, or it belongs to another deal. Open the document from the Deal Room instead.</p></div>;
+  const target: ViewerTarget = needsLookup && lookup.data ? { ...given, documentId: lookup.data.document_id, documentName: lookup.data.document_name, locator: given.locator ?? lookup.data.locator } : given;
+  return <ViewerLoaded dealId={dealId} target={target} />;
+}
+
+function ViewerLoaded({ dealId, target }: { dealId: string; target: ViewerTarget }) {
   const q = useDocEvidence(dealId, target.documentId);
   const [filter, setFilter] = useState<string>("all");
   const targetRef = useRef<HTMLElement | null>(null);
@@ -135,7 +146,8 @@ function SheetTable({ name, rows, highlight, targetId, setTarget }: { name: stri
         {Array.from({ length: width }, (_, i) => {
           const raw = vals[i] ?? "";
           const numeric = NUMERIC.test(String(raw).trim());
-          const cls = `border-b border-hairline px-2 py-1 whitespace-nowrap ${numeric ? "num text-right" : "text-left"} ${head ? "font-medium text-fg-muted" : ""}`;
+          // The label column wraps and is capped, so long descriptions never push the year columns out of view.
+          const cls = `border-b border-hairline px-2 py-1 ${i === 0 ? "max-w-[18rem] whitespace-normal" : "whitespace-nowrap"} ${numeric ? "num text-right" : "text-left"} ${head ? "font-medium text-fg-muted" : ""}`;
           return head ? <th key={i} scope="col" className={cls}>{fmtCell(raw)}</th> : <td key={i} className={cls}>{fmtCell(raw)}</td>;
         })}
       </tr>

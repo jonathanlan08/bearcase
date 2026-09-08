@@ -179,6 +179,22 @@ class SellerReply(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     user: Mapped[User] = relationship(foreign_keys=[user_id])
 
 
+class CustomQuestion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A question for the seller written or edited by a person (often drafted with the assistant), saved beside the
+    generated ones and exported with them. Removing one is a delete of the person's own row; generated questions are
+    never stored, so nothing generated is ever edited in place."""
+
+    __tablename__ = "custom_questions"
+    deal_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    why: Mapped[str | None] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
+    evidence_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    source_message_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chat_messages.id", ondelete="SET NULL"))
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+
+
 class Purchase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A Stripe Checkout purchase. Created pending when the session is opened; the webhook marks it paid."""
 

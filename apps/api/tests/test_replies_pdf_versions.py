@@ -70,3 +70,26 @@ def test_new_version_and_diff():
     # same file again is refused; a different kind of file is refused
     assert c.post(f"/api/deals/{deal}/documents/{doc_id}/versions", files={"file": ("again.xlsx", revised, "application/octet-stream")}).status_code == 422
     assert c.post(f"/api/deals/{deal}/documents/{doc_id}/versions", files={"file": ("x.csv", b"customer_name,revenue_type,revenue\\nA,maintenance,1\\n", "text/csv")}).status_code == 422
+
+
+def test_custom_question_joins_the_list_and_the_export():
+    c, deal = _own_demo()
+    ev = c.get(f"/api/deals/{deal}/claims").json()[0]["source_evidence_id"]
+    r = c.post(f"/api/deals/{deal}/seller-questions/custom", json={"question": "Please walk us through the FY2024 revenue by month.", "why": "Drafted after the growth discrepancy.", "severity": "high", "evidence_ids": [ev]})
+    assert r.status_code == 201, r.text
+    qid = r.json()["id"]
+    qs = c.get(f"/api/deals/{deal}/seller-questions").json()["questions"]
+    mine = next(q for q in qs if q["id"] == qid)
+    assert mine["kind"] == "custom" and mine["evidence_ids"] == [ev] and mine["document_names"]
+    assert "walk us through the FY2024 revenue" in c.get(f"/api/deals/{deal}/seller-questions/export?format=md").text
+    assert c.post(f"/api/deals/{deal}/seller-questions/custom", json={"question": "x" * 10, "evidence_ids": ["00000000-0000-0000-0000-000000000000"]}).status_code == 422
+    assert c.delete(f"/api/deals/{deal}/seller-questions/custom/{qid.split(':')[1]}").status_code == 204
+    assert all(q["id"] != qid for q in c.get(f"/api/deals/{deal}/seller-questions").json()["questions"])
+
+
+def test_repeated_issues_become_one_question():
+    c, deal = _own_demo()
+    qs = c.get(f"/api/deals/{deal}/seller-questions").json()["questions"]
+    recurring = [q for q in qs if "recurring" in q["question"].lower()]
+    assert len(recurring) == 1 and len(recurring[0]["document_names"]) >= 2
+    assert any("falls short of the coverage" in q["question"] for q in qs)

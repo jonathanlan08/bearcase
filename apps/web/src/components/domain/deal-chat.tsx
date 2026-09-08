@@ -1,11 +1,12 @@
 "use client";
 
 import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useDeal } from "@/components/app/hooks";
 import { Dialog } from "radix-ui";
-import { MessageSquareText, Plus, Send, Square, X, Trash2 } from "lucide-react";
+import { MessageSquareText, Plus, Send, Square, X, Trash2, Maximize2, Minimize2 } from "lucide-react";
 import { api, type ChatBudget } from "@/lib/api";
-import { useLocalString, useModifierKey } from "@/lib/hooks";
+import { useLocalString, useModifierKey, useLocalFlag } from "@/lib/hooks";
 import { onChatPrompt, setChatOpen, takeChatPrompt, toggleChat, useChatBus, resetChatBus } from "@/lib/chat-bus";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/primitives";
@@ -17,9 +18,9 @@ import { fmtDate, fmtInt } from "@/lib/format";
 
 /** "deal" when the reply used deal tools, resolved a citation, or stated an uncited figure; "general" only for a grounded general-assistant answer. */
 export type AnswerScope = "deal" | "general";
-export interface Citations extends CitationSources { unresolved?: number; material_sentences?: number; cited_sentences?: number; scope?: AnswerScope }
+export interface Citations extends CitationSources { unresolved?: number; material_sentences?: number; cited_sentences?: number; scope?: AnswerScope; uncited?: string[] }
 /** `notice` is the server-worded line from a `switch` event (the default model was busy and a fallback answered); only a streamed draft carries it. */
-export interface Msg { id: string; role: "user" | "assistant"; content: string; citations: Citations; tool_calls: Array<{ name: string; label?: string }>; grounded: boolean; scope?: AnswerScope; provider: string; model: string; label?: string; error: string | null; created_at: string; streaming?: boolean; tools?: string[]; notice?: string }
+export interface Msg { id: string; role: "user" | "assistant"; content: string; citations: Citations; tool_calls: Array<{ name: string; label?: string }>; grounded: boolean; scope?: AnswerScope; provider: string; model: string; label?: string; error: string | null; created_at: string; streaming?: boolean; tools?: string[]; notice?: string; stale?: boolean }
 interface Thread { id: string; title: string; created_at: string; updated_at: string; message_count: number }
 interface ThreadDetail extends Thread { messages: Msg[] }
 export interface ChatOption { provider: string; label: string; env: string; free_tier: boolean; free_tier_note: string; default_model: string; key_url: string; models?: string[] }
@@ -67,6 +68,7 @@ const CHIP = "rounded-[var(--radius-1)] border border-hairline px-2 py-1 text-le
 const lastThread = new Map<string, string>();
 
 export function DealChat({ dealId }: { dealId: string }) {
+  const [expanded, setExpanded] = useLocalFlag("bc.chat.expanded");
   const { open } = useChatBus();
   // Panel state lives in a module store so other screens can open it; leaving the deal must not carry it over.
   useEffect(() => () => resetChatBus(), [dealId]);
@@ -86,8 +88,8 @@ export function DealChat({ dealId }: { dealId: string }) {
       </Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-ink-950/30" />
-        <Dialog.Content className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[880px] flex-col bg-bg-raised shadow-[var(--shadow-2)] outline-none md:w-[min(80vw,880px)]" aria-describedby="chat-desc">
-          {open && <ChatPanel dealId={dealId} shortcut={shortcut} />}
+        <Dialog.Content className={`fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-bg-raised shadow-[var(--shadow-2)] outline-none ${expanded ? "max-w-none md:w-[calc(100vw-3.5rem)]" : "max-w-[880px] md:w-[min(80vw,880px)]"}`} aria-describedby="chat-desc">
+          {open && <ChatPanel dealId={dealId} shortcut={shortcut} expanded={!!expanded} onToggleExpand={() => setExpanded(!expanded)} />}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -109,7 +111,9 @@ function autosize(el: HTMLTextAreaElement | null): void {
   el.style.height = `${Math.min(160, el.scrollHeight)}px`;
 }
 
-function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
+function ChatPanel({ dealId, shortcut, expanded, onToggleExpand }: { dealId: string; shortcut: string; expanded: boolean; onToggleExpand: () => void }) {
+  const dealQ = useDeal(dealId);
+  const dealName = dealQ.data?.company_name;
   const qc = useQueryClient();
   const [threadId, setThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -119,6 +123,8 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
   // Bumped whenever the textarea should take focus with the caret after its text (a prefilled prompt, a new thread).
   const [focusTick, setFocusTick] = useState(0);
   const [viewer, setViewer] = useState<ViewerTarget | null>(null);
+  const [context, setContext] = useState<string | null>(null);
+  const [saving, setSaving] = useState<Msg | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -129,8 +135,14 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
   useEffect(() => { focusInput(inputRef.current); }, [threadId, focusTick]);
   useEffect(() => { autosize(inputRef.current); }, [input]);
   useEffect(() => { listRef.current?.scrollTo?.({ top: listRef.current.scrollHeight }); }, [messages]);
-  // Closing the panel mid-reply stops the stream instead of leaving it running against an unmounted panel.
-  useEffect(() => () => { abortRef.current?.abort(); }, []);
+  // Closing the panel mid-reply stops the stream. StrictMode runs this cleanup once on mount and remounts at once, so
+  // the abort is deferred a tick and skipped when the panel is still alive; otherwise the first contextual send died as
+  // "Stopped" before its reply arrived.
+  const alive = useRef(false);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; queueMicrotask(() => { if (!alive.current) abortRef.current?.abort(); }); };
+  }, []);
 
   const live = config.data?.live === true;
   const defaultModel = config.data?.model ?? "";
@@ -209,6 +221,10 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
     } catch (e) {
       const msg = e instanceof Error && e.name === "AbortError" ? "Stopped." : String(e);
       setMessages((m) => m.map((x) => (x.id === draft.id ? { ...x, error: msg, streaming: false } : x)));
+      if (!threadId) {
+        // The server opened a thread before the failure; keep this conversation in it rather than starting another.
+        api.get<Thread[]>(`/api/deals/${dealId}/chat/threads`).then((ts) => { const t = ts.find((x) => x.title === q.slice(0, 80)) ?? ts[0]; if (t) { setThreadId(t.id); lastThread.set(dealId, t.id); } }).catch(() => undefined);
+      }
     } finally {
       setBusy(false);
       abortRef.current = null;
@@ -227,6 +243,7 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
   // prefilled instead of dropped.
   useEffect(() => onChatPrompt((p) => {
     if (restoring || !takeChatPrompt(p.id)) return;
+    if (p.context) setContext(p.context);
     if (p.send && !busy) void send(p.text);
     else prefill(p.text);
   }), [restoring, busy, send, prefill]);
@@ -246,7 +263,13 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
           <Dialog.Description id="chat-desc" className="truncate text-[11px] text-fg-muted">
             {config.data ? (live ? "Answers drawn from the deal room, with citations" : "Offline mode: rule-based answers") : "Loading"}
           </Dialog.Description>
+          <p className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-fg-muted" aria-label="What the assistant is using">
+            <span className="rounded-[var(--radius-1)] border border-hairline px-1.5">Deal: {dealName ?? "this deal"}</span>
+            {context && <span className="inline-flex items-center gap-1 rounded-[var(--radius-1)] border border-hairline px-1.5">{context}<button type="button" aria-label="Clear the selected claim" className="text-fg-muted hover:text-fg" onClick={() => setContext(null)}>×</button></span>}
+            <span className="rounded-[var(--radius-1)] border border-hairline px-1.5">Documents: all processed</span>
+          </p>
         </div>
+        <button type="button" onClick={onToggleExpand} className="hidden rounded-[var(--radius-1)] p-1.5 text-fg-muted hover:bg-bg-muted md:block" aria-pressed={expanded} aria-label={expanded ? "Use the side panel" : "Expand to a workspace"}>{expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
         {pickModel && (
           <select aria-label="Model" value={model} onChange={(e) => setStoredModel(e.target.value)} className="h-7 max-w-[9rem] shrink rounded-[var(--radius-1)] border border-hairline bg-bg-raised px-1.5 text-[11px] text-fg md:max-w-[14rem]">
             {models.map((id) => <option key={id} value={id}>{id}</option>)}
@@ -290,7 +313,7 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
               </div>
             )}
             <ol className="flex flex-col gap-4">
-              {messages.map((m) => <MessageView key={m.id} m={m} onOpen={setViewer} onRegenerate={m.id === lastAssistant?.id ? regenerate : undefined} />)}
+              {messages.map((m) => <MessageView key={m.id} m={m} onOpen={setViewer} onRegenerate={m.id === lastAssistant?.id ? regenerate : undefined} onSave={m.role === "assistant" && m.content && !m.streaming ? () => setSaving(m) : undefined} />)}
             </ol>
           </div>
           <div className="border-t border-hairline p-3">
@@ -310,8 +333,58 @@ function ChatPanel({ dealId, shortcut }: { dealId: string; shortcut: string }) {
         </div>
       </div>
       <DocumentViewer dealId={dealId} target={viewer} onClose={() => setViewer(null)} />
+      {saving && <SaveQuestionDialog dealId={dealId} message={saving} onClose={() => setSaving(null)} />}
     </>
   );
+}
+
+/** Turn an answer into a seller question the reader edits before it is saved; nothing is sent anywhere. */
+function SaveQuestionDialog({ dealId, message, onClose }: { dealId: string; message: Msg; onClose: () => void }) {
+  const qc = useQueryClient();
+  const draft = firstQuestion(stripCitations(message.content));
+  const [question, setQuestion] = useState(draft);
+  const [why, setWhy] = useState("Drafted with the assistant; edited by the reviewer.");
+  const [severity, setSeverity] = useState("medium");
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const evidence = (message.citations.evidence ?? []).map((e) => e.id).slice(0, 20);
+  const m = useMutation({
+    mutationFn: () => api.post<{ id: string }>(`/api/deals/${dealId}/seller-questions/custom`, { question: question.trim(), why: why.trim() || undefined, severity, evidence_ids: evidence, source_message_id: /^[0-9a-f-]{36}$/.test(message.id) ? message.id : undefined }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sellerQuestions", dealId] }); setDone(true); },
+    onError: (e) => setError(String(e)),
+  });
+  return (
+    <Dialog.Root open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/40" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-[60] w-[min(92vw,520px)] -translate-x-1/2 -translate-y-1/2 rounded-[var(--radius-3)] border border-hairline bg-bg-raised p-5 shadow-lg" aria-describedby="save-q-desc">
+          <Dialog.Title className="text-lg font-semibold">Save as a question for the seller</Dialog.Title>
+          <Dialog.Description id="save-q-desc" className="mt-1 text-sm text-fg-muted">Edit it first. It joins the Seller Questions list under “Written by the reviewer”, with the {evidence.length} source{evidence.length === 1 ? "" : "s"} this answer cited. Nothing is sent to anyone.</Dialog.Description>
+          {done ? (
+            <div className="mt-4 text-sm"><p>Saved. It is now in Seller Questions.</p><div className="mt-3 flex justify-end"><Button type="button" onClick={onClose}>Back to the conversation</Button></div></div>
+          ) : (
+            <form className="mt-4 flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); if (question.trim().length >= 5) m.mutate(); }}>
+              <label className="text-xs text-fg-muted" htmlFor="save-q-text">Question</label>
+              <textarea id="save-q-text" className="min-h-[96px] rounded-[var(--radius-1)] border border-hairline bg-bg px-2 py-1.5 text-sm" value={question} onChange={(e) => setQuestion(e.target.value)} required />
+              <label className="text-xs text-fg-muted" htmlFor="save-q-why">Why we ask</label>
+              <input id="save-q-why" className="h-9 rounded-[var(--radius-1)] border border-hairline bg-bg px-2 text-sm" value={why} onChange={(e) => setWhy(e.target.value)} />
+              <label className="text-xs text-fg-muted" htmlFor="save-q-sev">Priority</label>
+              <select id="save-q-sev" className="h-9 w-40 rounded-[var(--radius-1)] border border-hairline bg-bg px-2 text-sm" value={severity} onChange={(e) => setSeverity(e.target.value)}>{["critical", "high", "medium", "low"].map((s) => <option key={s} value={s}>{s}</option>)}</select>
+              {error && <p role="alert" className="text-sm text-red">{error}</p>}
+              <div className="flex justify-end gap-2"><Dialog.Close asChild><Button type="button" variant="secondary">Cancel</Button></Dialog.Close><Button type="submit" loading={m.isPending}>Save to Seller Questions</Button></div>
+            </form>
+          )}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+/** The first question-shaped sentence in an answer, or its first sentence, as the draft. */
+function firstQuestion(text: string): string {
+  const plain = text.replace(/[*_`#>]/g, "").replace(/\s+/g, " ").trim();
+  const sentences = plain.split(/(?<=[.?!])\s+/);
+  return (sentences.find((s) => s.trim().endsWith("?")) ?? sentences[0] ?? plain).trim().slice(0, 1500);
 }
 
 /** Empty-state block when no model is connected: one instruction and the provider options in API order (free tiers first). */
@@ -372,7 +445,7 @@ export function grounding(m: Msg): { status: string; text: string; detail: strin
   return { status: "supported", text: `All ${fmtInt(n)} citations resolve · review the answer`, detail };
 }
 
-export function MessageView({ m, onOpen, onRegenerate }: { m: Msg; onOpen: (t: ViewerTarget) => void; onRegenerate?: () => void }) {
+export function MessageView({ m, onOpen, onRegenerate, onSave }: { m: Msg; onOpen: (t: ViewerTarget) => void; onRegenerate?: () => void; onSave?: () => void }) {
   const [copied, setCopied] = useState(false);
   if (m.role === "user") return <li className="self-end max-w-[85%] rounded-[var(--radius-3)] bg-bg-muted px-3.5 py-2.5 text-sm">{m.content}</li>;
   const tools = m.tools?.length ? m.tools : m.tool_calls.map((t) => t.label ?? t.name);
@@ -398,6 +471,12 @@ export function MessageView({ m, onOpen, onRegenerate }: { m: Msg; onOpen: (t: V
             : <RichText text={m.content} citations={m.citations} onOpen={onOpen} />}
         {m.streaming && m.content && CURSOR}
       </div>
+      {m.stale && <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-amber"><StatusGlyph status="review_required" size={11} />Based on an earlier version of the deal: a figure it cites has since been corrected or its document revised. Regenerate for the current numbers.</p>}
+      {finished && (m.citations.uncited?.length ?? 0) > 0 && (
+        <ul className="mt-2 space-y-1 text-xs text-fg-muted" aria-label="Passages without a citation">
+          {m.citations.uncited!.map((u, i) => <li key={i} className="flex gap-1.5"><StatusGlyph status="review_required" size={11} className="mt-0.5 shrink-0" /><span>Not cited: “{u}”. Treat this figure as unverified, or ask for its source.</span></li>)}
+        </ul>
+      )}
       {m.error && (isRateLimit(m.error)
         ? <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-fg-muted"><StatusGlyph status="review_required" size={11} />{m.error}</p>
         : <p className="mt-2 text-xs text-red">{m.error}</p>)}
@@ -407,6 +486,7 @@ export function MessageView({ m, onOpen, onRegenerate }: { m: Msg; onOpen: (t: V
           <span>{fmtDate(m.created_at)}</span>
           {m.content && <button type="button" onClick={copy} aria-live="polite" className={ACTION}>{copied ? "Copied" : "Copy"}</button>}
           {onRegenerate && <button type="button" onClick={onRegenerate} className={ACTION}>Regenerate</button>}
+          {onSave && <button type="button" onClick={onSave} className={ACTION}>Save as seller question</button>}
         </div>
       )}
     </li>

@@ -41,6 +41,26 @@ _SCALE = re.compile(r"in\s+thousands|(?<![\d,.])\$?\s?000'?s?\b|\bthousands\b|in
 _MILLIONS = re.compile(r"million|\$mm\b|\$m\b", re.I)
 
 
+_CURRENCY = re.compile(r"\b(USD|US\$|EUR|GBP|CAD|AUD)\b|\(\$\)|\$000|US dollars|dollars", re.I)
+
+
+def detect_currency(text: str) -> str | None:
+    """The currency a title row states ("(USD)", "in US dollars", "$000s"), or None when it states none."""
+    m = _CURRENCY.search(text)
+    if not m:
+        return None
+    tok = m.group(0).upper()
+    if "EUR" in tok:
+        return "EUR"
+    if "GBP" in tok:
+        return "GBP"
+    if "CAD" in tok:
+        return "CAD"
+    if "AUD" in tok:
+        return "AUD"
+    return "USD"
+
+
 def detect_scale(text: str) -> int:
     """1, 1_000, or 1_000_000 from a title such as "Income Statement (USD in thousands)"."""
     m = _SCALE.search(text)
@@ -73,6 +93,7 @@ class StatementMap:
     unmapped_rows: list[dict[str, Any]] = field(default_factory=list)
     header_row: int | None = None
     scale: int = 1  # multiplier stated by the sheet (thousands, millions); values are already multiplied
+    currency: str | None = None  # stated by a title row, or None when the sheet does not say
     # Line keys whose value was assembled from several component rows because no total row exists; a
     # reviewer must confirm the sum. {line_key: [row labels]}
     ambiguous: dict[str, list[str]] = field(default_factory=dict)
@@ -140,6 +161,7 @@ def _map_sheet(sheet: str, rows: list[tuple[int, ParsedChunk]]) -> StatementMap 
     header_row = None
     period_cols: dict[int, str] = {}
     scale = 1
+    currency: str | None = None
     for _, c in rows:
         values = c.structured["values"] if c.structured else []
         found = {ci: v.strip().upper().replace(" ", "") for ci, v in enumerate(values) if _PERIOD.match(v.strip())}
@@ -149,17 +171,20 @@ def _map_sheet(sheet: str, rows: list[tuple[int, ParsedChunk]]) -> StatementMap 
             period_cols = {ci: (v if v.startswith("FY") else f"FY{v}") for ci, v in found.items()}
             break
         # rows above the header are titles: "Income Statement (USD in thousands)"
-        scale = max(scale, detect_scale(" ".join(v for v in values if v)))
+        title = " ".join(v for v in values if v)
+        scale = max(scale, detect_scale(title))
+        currency = currency or detect_currency(title)
     if header is None:
         return None
     scale = max(scale, detect_scale(sheet))
+    currency = currency or detect_currency(sheet)
     # Columns keep whatever order the seller chose; the statement is always oldest -> newest, because every
     # cross-period calculation (growth, CAGR) assumes that. Two columns naming the same year are rejected.
     labelled = sorted(period_cols.items(), key=lambda kv: (period_year(kv[1]) or 0, kv[0]))
     periods = [label for _, label in labelled]
     if len(set(periods)) != len(periods):
         return None
-    smap = StatementMap(sheet=sheet, periods=periods, header_row=header_row, scale=scale)
+    smap = StatementMap(sheet=sheet, periods=periods, header_row=header_row, scale=scale, currency=currency)
     for p in periods:
         smap.lines[p] = {}
     from openpyxl.utils import get_column_letter

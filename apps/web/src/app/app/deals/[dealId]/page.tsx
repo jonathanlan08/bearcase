@@ -1,10 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import { useMutation } from "@tanstack/react-query";
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useClaims, useSummary, useProcessDeal } from "@/components/app/hooks";
+import { useClaims, useSummary, useProcessDeal, useAudit } from "@/components/app/hooks";
 import { useProgress } from "@/components/app/workflow-hooks";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
 import { Button, buttonClass } from "@/components/ui/button";
@@ -82,6 +84,32 @@ const verb = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 /** Engine text carries raw Decimals ("22.00772201", "10.00000000", "0E-8") and bare dollar amounts; round to two places and add separators. */
 const trimDecimal = (n: number) => (Number.isFinite(n) ? n.toFixed(2).replace(/\.?0+$/, "") : "n/a");
+const DIGEST_TYPES: Record<string, string> = { "document.version_uploaded": "revised document", "statement.corrected": "corrected figure", "seller_reply.recorded": "seller reply", "deal.analyzed": "analysis run", "seller_question.added": "question added", "document.uploaded": "document added" };
+const DIGEST_HREF: Record<string, string> = { "document.version_uploaded": "documents", "statement.corrected": "financials", "seller_reply.recorded": "questions", "deal.analyzed": "inbox", "seller_question.added": "questions", "document.uploaded": "documents" };
+
+/** What changed since this browser last opened the deal: revised documents, corrected figures, seller replies, and
+ *  analysis runs, read from the audit trail after the remembered timestamp. Remembered per deal in this browser only. */
+function SinceLastVisit({ dealId, base }: { dealId: string; base: string }) {
+  const audit = useAudit(dealId);
+  const key = `bc.lastvisit.${dealId}`;
+  const [since] = useState<string | null>(() => { try { return localStorage.getItem(key); } catch { return null; } });
+  useEffect(() => { try { localStorage.setItem(key, new Date().toISOString()); } catch { /* storage unavailable */ } }, [key]);
+  if (!since || !audit.data) return null;
+  const events = audit.data.filter((e) => e.event_type in DIGEST_TYPES && e.created_at > since);
+  if (events.length === 0) return null;
+  const counts = new Map<string, number>();
+  for (const e of events) counts.set(e.event_type, (counts.get(e.event_type) ?? 0) + 1);
+  return (
+    <section aria-labelledby="since-heading" className="rounded-[var(--radius-3)] border border-accent/40 bg-bg-raised p-4">
+      <h2 id="since-heading" className="text-sm font-medium">Since you were last here <span className="font-normal text-fg-muted">({fmtDate(since)})</span></h2>
+      <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        {[...counts.entries()].map(([type, n]) => <li key={type}><Link href={`${base}/${DIGEST_HREF[type]}`} className="hover:underline"><span className="num">{n}</span> {DIGEST_TYPES[type]}{n === 1 ? "" : "s"}</Link></li>)}
+      </ul>
+      <p className="mt-1 text-xs text-fg-muted">{events.some((e) => e.event_type === "document.version_uploaded" || e.event_type === "statement.corrected") ? "Figures and findings may have moved; the review queue has what needs another look." : "The queue has anything that needs another look."}</p>
+    </section>
+  );
+}
+
 /** The one-page summary: what gets forwarded to a lender or a lawyer. Fetched with the session, then handed to the browser's save dialog. */
 export function SummaryPdfButton({ dealId }: { dealId: string }) {
   const { toast } = useToast();
@@ -217,6 +245,7 @@ export default function OverviewPage() {
             </dl>
           </details>
         </section>
+        <SinceLastVisit dealId={dealId} base={base} />
         <WorkflowStrip steps={steps} />
         <Panel title="The three findings to read first" actions={<Link href={`${base}/inbox`} className="text-xs text-accent hover:underline">Open the review queue</Link>}>
           {d.top_findings.length === 0 ? <p className="text-sm text-fg-muted">No findings yet.</p> : (
