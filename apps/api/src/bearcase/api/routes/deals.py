@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 
 from bearcase.api.deps import DbDep, DealDep, EditorDealDep, OwnerDealDep, UserDep, accepted_membership_ids
 from bearcase.api.schemas import DealCreate, DealListItem, DealOut, DealSummary, FindingOut, ProcessResponse
+from bearcase.reports.resolution import resolution_for
 from bearcase.audit import record
 from bearcase.auth import delete_deal_with_files
 from bearcase.config import get_settings
@@ -149,8 +150,8 @@ def deal_summary(deal: DealDep, db: DbDep) -> DealSummary:
         reported_ebitda=metric("ebitda_reported"),
         dscr_by_scenario=dscr,
         covenant_threshold=deal.covenant_dscr_threshold,
-        missing_documents=[FindingOut.model_validate(x) for x in findings if x.kind == FindingKind.MISSING_DOCUMENT],
-        top_findings=[FindingOut.model_validate(x) for x in top],
+        missing_documents=[_finding_out(db, x) for x in findings if x.kind == FindingKind.MISSING_DOCUMENT],
+        top_findings=[_finding_out(db, x) for x in top],
         latest_report={
             "id": str(report.id),
             "version_no": report.version_no,
@@ -206,9 +207,18 @@ def delete_deal(deal: OwnerDealDep, db: DbDep, user: UserDep) -> None:
 @router.get("/{deal_id}/findings", response_model=list[FindingOut])
 def list_findings(deal: DealDep, db: DbDep) -> list[Finding]:
     rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-    return sorted(
+    rows = sorted(
         db.scalars(select(Finding).where(Finding.deal_id == deal.id)).all(), key=lambda x: (rank[x.severity.value], x.created_at)
     )
+    return [_finding_out(db, x) for x in rows]
+
+
+def _finding_out(db: Session, f: Finding) -> FindingOut:
+    """A finding with the one sentence on what would change it."""
+    out = FindingOut.model_validate(f)
+    claim = db.get(Claim, f.claim_id) if f.claim_id else None
+    out.resolution = resolution_for(f, claim)
+    return out
 
 
 _ = ReviewDecision

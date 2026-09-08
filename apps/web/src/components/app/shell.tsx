@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useLocalFlag } from "@/lib/hooks";
-import { FolderOpen, ListChecks, Calculator, FlaskConical, FileText, MessageCircleQuestionMark, LayoutDashboard, History, PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, MoreHorizontal, ShieldCheck } from "lucide-react";
+import { FolderOpen, ListChecks, Calculator, FlaskConical, FileText, MessageCircleQuestionMark, LayoutDashboard, History, PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, MoreHorizontal, ShieldCheck, Inbox } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, auth, errorDetail } from "@/lib/api";
@@ -24,6 +24,7 @@ const PRIMARY = [
 ];
 const SECONDARY = [
   { key: "", label: "Overview", Icon: LayoutDashboard },
+  { key: "inbox", label: "Review queue", Icon: Inbox },
   { key: "audit", label: "Audit history", Icon: History },
 ];
 
@@ -96,10 +97,7 @@ export function DealShell({ children }: { children: React.ReactNode }) {
         </nav>
         <div className="mt-auto flex flex-col gap-2 p-3">
           {!collapsed && chatConfig.data && (
-            <div className="rounded-[var(--radius-2)] border border-hairline p-2">
-              <p className="text-xs font-medium">Assistant</p>
-              <p className="mt-0.5 truncate text-[11px] text-fg-muted">{chatConfig.data.live ? chatConfig.data.label : "Offline, rule-based"}</p>
-            </div>
+            <p className="truncate px-1 text-[11px] text-fg-muted">Assistant: {chatConfig.data.live ? chatConfig.data.label : "offline, rule-based"}</p>
           )}
           {!collapsed && deal.data?.is_demo && <p className="text-[11px] leading-snug text-fg-muted">Northstar HVAC is fictional. Not financial, legal, tax, or investment advice.</p>}
           <Link href="/trust" className="flex h-8 items-center gap-2 rounded-[var(--radius-1)] px-1 text-xs text-fg-muted hover:bg-bg-muted hover:text-fg" title={collapsed ? "Trust & data" : undefined} aria-label={collapsed ? "Trust & data" : undefined}><ShieldCheck size={14} />{!collapsed && "Trust & data"}</Link>

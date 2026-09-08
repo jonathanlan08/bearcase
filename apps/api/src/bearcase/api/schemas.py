@@ -434,6 +434,7 @@ class FindingOut(Out):
     status: str
     claim_id: uuid.UUID | None
     created_at: datetime
+    resolution: str | None = None  # what would change this finding (reports/resolution.py)
 
 
 class ReportOut(Out):

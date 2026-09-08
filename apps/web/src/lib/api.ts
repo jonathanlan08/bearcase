@@ -104,6 +104,9 @@ export interface MappedLine { key: string; cells: Record<string, MappedCell>; co
 export interface MappedStatement { document_id: string; document_name: string; mapped: boolean; reason?: string; sheet?: string; header_row?: number | null; scale?: number; currency?: string; periods?: { label: string; year: number | null }[]; lines?: MappedLine[]; unmapped_rows?: { row: number; label: string }[] }
 export interface Coverage { documents_ready: number; documents_failed: number; documents_pending: number; statements_mapped: number; statements_unmapped: number; unmapped_rows: number; ambiguous_lines: number; metrics_requiring_review: number; claims_by_status: Record<string, number> }
 export interface StatementMapping { statements: MappedStatement[]; coverage: Coverage }
+/** The review inbox (api/routes/insights.py review_queue): what a person still has to decide, grouped. */
+export interface QueueItem { id: string; title: string; detail: string; href_key: "documents" | "financials" | "claims" | "questions"; status?: string; claim_id?: string; adjustment_id?: string; resolution?: string | null }
+export interface ReviewQueue { groups: { key: string; title: string; items: QueueItem[] }[]; total: number }
 
 export interface Assumption { key: string; label: string; value: string; unit: Unit }
 export interface YearRow { year: number; revenue: string; gross_profit: string; labor_opex: string; other_opex: string; addbacks: string; ebitda: string; depreciation_amortization: string; interest: string; principal: string; taxable_income: string; cash_taxes: string; working_capital_investment: string; cfads: string; debt_service: string; dscr: string | null; fcfe: string; closing_debt: string }
@@ -115,7 +118,7 @@ export interface AssumptionSpec { key: string; label: string; unit: Unit; min: n
 export interface ScenarioFacts { facts: Record<string, string | number | null>; missing: string[]; specs: AssumptionSpec[] }
 export interface Sensitivity { row_key: string; col_key: string; row_values: string[]; col_values: string[]; output: string; threshold: string | null; cells: Array<Array<{ row: string; col: string; value: string | null; breach: boolean }>> }
 
-export interface Finding { id: string; key: string; kind: string; severity: string; title: string; detail: string; evidence_ids: string[]; metric_ids: string[]; status: string; claim_id: string | null; created_at: string }
+export interface Finding { id: string; key: string; kind: string; severity: string; title: string; detail: string; evidence_ids: string[]; metric_ids: string[]; status: string; claim_id: string | null; created_at: string; resolution: string | null }
 export interface ReportStatement { text: string; evidence_ids: string[]; metric_ids: string[] }
 export interface ReportSection { key: string; title: string; kind: string; statements: ReportStatement[]; table: { columns?: string[]; rows?: Array<{ label: string; cells: string[]; evidence_ids: string[]; metric_ids?: string[]; [k: string]: unknown }> }; derived_from: string[] }
 export interface Report { id: string; deal_id: string; version_no: number; status: string; outcome: string; sections: ReportSection[]; validation: { valid: boolean; statements_total: number; material_statements: number; material_cited: number; uncited: Array<{ section: string; index: number; text: string }>; unresolved: unknown[] }; provider: string; model: string; prompt_version: string; schema_version: string; engine_version: string; input_snapshot: Record<string, unknown>; created_at: string }

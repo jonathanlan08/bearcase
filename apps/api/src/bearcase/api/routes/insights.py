@@ -23,7 +23,11 @@ from bearcase.models import (
     DocumentVersion,
     ReviewDecision,
 )
-from bearcase.models.enums import DocumentStatus, LinkRole
+from bearcase.ingest.statement_mapper import map_income_statement
+from bearcase.models import Adjustment, Evidence, Finding, FinancialMetric
+from bearcase.models.enums import AdjustmentDecision, ClaimStatus, DocumentStatus, DocumentType, EvidenceKind, FindingKind, FindingStatus, LinkRole
+from bearcase.pipeline.analyze import _chunks_from_evidence
+from bearcase.reports.resolution import resolution_for
 
 router = APIRouter(tags=["insights"])
 
@@ -195,3 +199,49 @@ def review_dataset(deal: OwnerDealDep, db: DbDep, user: UserDep) -> Response:
         media_type="application/x-ndjson; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="bearcase-{slug}-reviews.jsonl"'},
     )
+
+
+@router.get("/deals/{deal_id}/review-queue")
+def review_queue(deal: DealDep, db: DbDep) -> dict[str, Any]:
+    """The review inbox: everything a person still has to decide, in the order to do it. Four groups, each an
+    ordered list of items with the page that settles them. Read from persisted rows; empty groups are still
+    returned so the page can say "nothing here"."""
+    # 1. Imported figures to confirm: lines the mapper was unsure about, and metrics the pipeline flagged.
+    figures: list[dict[str, Any]] = []
+    for doc in db.scalars(select(Document).where(Document.deal_id == deal.id, Document.doc_type == DocumentType.FINANCIAL_STATEMENTS)):
+        rows = db.scalars(select(Evidence).where(Evidence.document_id == doc.id, Evidence.kind == EvidenceKind.SHEET_ROW).order_by(Evidence.chunk_index)).all()
+        smap = map_income_statement(_chunks_from_evidence(rows))
+        if smap is None:
+            figures.append({"id": f"unmapped:{doc.id}", "title": f"{doc.display_name} was not read as a statement", "detail": "No sheet with an income-statement name and two year columns.", "href_key": "documents"})
+            continue
+        for key, components in smap.ambiguous.items():
+            figures.append({"id": f"sum:{doc.id}:{key}", "title": f"{key.replace('opex_', '').replace('_', ' ').capitalize()} was summed from {len(components)} rows", "detail": " + ".join(components), "href_key": "financials"})
+        if smap.scale != 1:
+            figures.append({"id": f"scale:{doc.id}", "title": f"Values were multiplied by {smap.scale:,} from the sheet title", "detail": f"Sheet {smap.sheet}: confirm the scale is right before relying on any figure.", "href_key": "financials"})
+    for m in db.scalars(select(FinancialMetric).where(FinancialMetric.deal_id == deal.id, FinancialMetric.requires_review.is_(True)).order_by(FinancialMetric.created_at)):
+        figures.append({"id": f"metric:{m.id}", "title": f"{m.label} needs a look", "detail": "; ".join(m.notes) if getattr(m, "notes", None) else (m.formula or "Flagged by the pipeline."), "href_key": "financials"})
+    # 2. Discrepancies to review: claims the documents contradict, leave open, or that need a human call, with no decision yet.
+    discrepancies: list[dict[str, Any]] = []
+    order = {ClaimStatus.CONTRADICTED: 0, ClaimStatus.REVIEW_REQUIRED: 1, ClaimStatus.UNSUPPORTED: 2}
+    claims = db.scalars(select(Claim).where(Claim.deal_id == deal.id, Claim.status.in_(list(order)))).all()
+    decided = {d.claim_id for d in db.scalars(select(ReviewDecision).where(ReviewDecision.deal_id == deal.id, ReviewDecision.is_current.is_(True)))}
+    for c in sorted(claims, key=lambda c: (order[c.status], c.created_at)):
+        if c.id in decided:
+            continue
+        discrepancies.append({"id": str(c.id), "title": c.claim_text[:140], "detail": c.status_rationale or "", "status": c.status.value, "href_key": "claims", "claim_id": str(c.id)})
+    # 3. Add-back decisions the rules made and nobody has confirmed.
+    adjustments: list[dict[str, Any]] = []
+    for a in db.scalars(select(Adjustment).where(Adjustment.deal_id == deal.id).order_by(Adjustment.sort_order)):
+        if a.decided_by_user_id is None and a.decision in (AdjustmentDecision.ACCEPTED, AdjustmentDecision.REVIEW_REQUIRED):
+            adjustments.append({"id": str(a.id), "title": f"{a.label}: rule said {a.decision.value.replace('_', ' ')}", "detail": a.decision_rationale or "", "href_key": "financials", "adjustment_id": str(a.id)})
+    # 4. Missing documents to request.
+    missing: list[dict[str, Any]] = []
+    for f in db.scalars(select(Finding).where(Finding.deal_id == deal.id, Finding.kind == FindingKind.MISSING_DOCUMENT, Finding.status == FindingStatus.OPEN).order_by(Finding.created_at)):
+        missing.append({"id": str(f.id), "title": f.title, "detail": f.detail, "resolution": resolution_for(f, None), "href_key": "questions"})
+    groups = [
+        {"key": "figures", "title": "Confirm these imported figures", "items": figures},
+        {"key": "discrepancies", "title": "Review these discrepancies", "items": discrepancies},
+        {"key": "adjustments", "title": "Confirm these add-back decisions", "items": adjustments},
+        {"key": "missing", "title": "Resolve these missing documents", "items": missing},
+    ]
+    return {"groups": groups, "total": sum(len(g["items"]) for g in groups)}

@@ -78,7 +78,15 @@ export default function ReportPage() {
                 <ul className="mt-2 list-disc pl-5 text-fg-muted">{r.validation.uncited.slice(0, 8).map((u, i) => <li key={i}><span className="font-mono text-xs">{u.section}</span>: {u.text}</li>)}</ul>
               </div>
             )}
-            {r.sections.map((s) => <Section key={s.key} s={s} onPeek={setPeek} onOpen={openEvidence} peek={peek} />)}
+            {r.sections.map((s, i) => LEAD_SECTIONS.has(s.key) || i < 2
+              ? <Section key={s.key} s={s} onPeek={setPeek} onOpen={openEvidence} peek={peek} />
+              : (
+                <details key={s.key} id={`sec-${s.key}`} className="mb-4 scroll-mt-4 rounded-[var(--radius-2)] border border-hairline">
+                  <summary className="cursor-pointer list-none px-4 py-3 text-base font-medium [&::-webkit-details-marker]:hidden">{s.title}<span className="ml-2 text-xs font-normal text-fg-muted">{s.statements.length} statement{s.statements.length === 1 ? "" : "s"}{s.table?.rows?.length ? `, ${s.table.rows.length} rows` : ""}</span></summary>
+                  <div className="border-t border-hairline px-4 pb-2"><Section s={{ ...s, key: `${s.key}-body` }} onPeek={setPeek} onOpen={openEvidence} peek={peek} /></div>
+                </details>
+              ))}
+            <p className="mt-2 text-xs text-fg-muted">The first sections are the review. The rest is the ledger behind it; open a section to read it, or use the jump list.</p>
           </article>
           <aside className="hidden 2xl:sticky 2xl:top-4 2xl:block 2xl:self-start">
             <div className="rounded-[var(--radius-3)] border border-hairline bg-bg-raised p-3 text-sm">
@@ -100,6 +108,9 @@ export default function ReportPage() {
     </div>
   );
 }
+
+/** Sections shown open: the review itself. Everything else is the ledger behind it and opens on demand. */
+const LEAD_SECTIONS = new Set(["executive_summary", "contradictions", "open_questions", "management_questions", "reviewer_decisions"]);
 
 function Cite({ id, kind, onPeek, onOpen, active }: { id: string; kind: "E" | "M"; onPeek: (id: string | null) => void; onOpen: (id: string) => void; active: boolean }) {
   const label = `${kind}:${id.slice(0, 6)}`;

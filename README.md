@@ -8,7 +8,7 @@ BearCase AI is an open-source prototype for reviewing a small-business acquisiti
 
 The workflow is one path: upload documents, see the important discrepancies, inspect the evidence, export questions for the seller. The chat helps you finish that path ("Explain this finding", "Draft a question for the seller about this") rather than replacing it.
 
-[Demo](#quick-start) · [First session](#what-you-can-answer-in-a-first-session) · [Deploy](#deploy) · [Methodology](docs/formulas/README.md) · [Go-to-market](docs/go-to-market.md) · [Evaluation](docs/evaluation.md) · [Architecture](docs/architecture.md) · [Design](docs/design/README.md) · [Security](SECURITY.md) · [Review response](docs/astra-review-response.md) · How your documents are handled: the `/trust` page of any deployment (http://localhost:3000/trust locally)
+[Demo](#quick-start) · [First session](#what-you-can-answer-in-a-first-session) · [Deploy](#deploy) · [Methodology](docs/formulas/README.md) · [Go-to-market](docs/go-to-market.md) · [Evaluation](docs/evaluation.md (see also docs/case-study-period-order.md, a real defect and its fix)) · [Architecture](docs/architecture.md) · [Design](docs/design/README.md) · [Security](SECURITY.md) · [Review response](docs/astra-review-response.md) · How your documents are handled: the `/trust` page of any deployment (http://localhost:3000/trust locally)
 
 > The included Northstar HVAC deal is entirely fictional. BearCase is an educational prototype and does not provide financial, legal, tax, or investment advice. Do not upload confidential documents to a public deployment yet; see [Limits](#limits).
 

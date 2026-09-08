@@ -72,7 +72,6 @@ function WorkflowStrip({ steps }: { steps: Array<{ key: ProgressKey; title: stri
     </section>
   );
 }
-const KIND_LABEL: Record<string, string> = { contradiction: "Contradiction", unsupported_assumption: "Unsupported", covenant_warning: "Loan coverage", concentration: "Concentration", risk: "Risk", document_integrity: "Document integrity", missing_document: "Missing document" };
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const KIND_PREFIX = /^(?:Contradicted|Unsupported|Missing|Risk):\s*/i;
 
@@ -188,7 +187,30 @@ export default function OverviewPage() {
           </details>
         </section>
         <WorkflowStrip steps={steps} />
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <Panel title="The three findings to read first" actions={<Link href={`${base}/inbox`} className="text-xs text-accent hover:underline">Open the review queue</Link>}>
+          {d.top_findings.length === 0 ? <p className="text-sm text-fg-muted">No findings yet.</p> : (
+            <ol className="divide-y divide-hairline">
+              {d.top_findings.slice(0, 3).map((f, i) => {
+                const title = findingTitle(f);
+                const detail = findingDetail(f, title);
+                return (
+                  <li key={f.id} className="flex items-start gap-3 py-3 text-sm">
+                    <span className="num w-5 shrink-0 pt-0.5 text-xs text-fg-muted">{i + 1}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2"><Link href={findingHref(base, f)} className="font-medium hover:underline">{title}</Link><SeverityChip severity={f.severity} /></div>
+                      {detail && <p className="mt-1 text-fg-muted">{detail}</p>}
+                      {f.resolution && <p className="mt-1 text-fg-muted"><span className="font-medium text-fg">What would change this:</span> {f.resolution}</p>}
+                      <FindingActions title={title} />
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </Panel>
+        <details className="group rounded-[var(--radius-3)] border border-hairline bg-bg-raised">
+          <summary className="cursor-pointer list-none px-5 py-3 text-sm font-medium marker:hidden [&::-webkit-details-marker]:hidden">More on this deal <span className="ml-2 font-normal text-fg-muted">claims by status, EBITDA, debt coverage, missing information, documents, report</span></summary>
+        <div className="grid gap-4 border-t border-hairline p-4 md:grid-cols-2 xl:grid-cols-3">
           <Panel title="Claims checked" actions={<Link href={`${base}/claims`} className="text-xs text-accent hover:underline">Open Claim Audit</Link>}>
             {total === 0 ? <p className="text-sm text-fg-muted">{noDocs ? "Add documents in the Deal Room to begin." : running ? "Analysis is running…" : "No claims yet. Run analysis to extract and check the claims."}</p> : (
               <>
@@ -234,27 +256,6 @@ export default function OverviewPage() {
               </ul>
             )}
           </Panel>
-          <Panel title="Top findings" className="md:col-span-2" actions={<Link href={`${base}/report`} className="text-xs text-accent hover:underline">Open Red-Team Report</Link>}>
-            {d.top_findings.length === 0 ? <p className="text-sm text-fg-muted">No findings yet.</p> : (
-              <ul className="divide-y divide-hairline">
-                {d.top_findings.map((f) => {
-                  const title = findingTitle(f);
-                  const detail = findingDetail(f, title);
-                  return (
-                    <li key={f.id} className="flex items-start gap-3 py-2 text-sm">
-                      <SeverityChip severity={f.severity} />
-                      <div className="min-w-0 flex-1">
-                        <Link href={findingHref(base, f)} className="font-medium hover:underline">{title}</Link>
-                        {detail && <p className="mt-0.5 line-clamp-2 text-fg-muted">{detail}</p>}
-                        <FindingActions title={title} />
-                      </div>
-                      <span className="shrink-0 text-[11px] text-fg-muted">{KIND_LABEL[f.kind] ?? titleCase(f.kind)}</span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </Panel>
           <Panel title="Missing information">
             {d.missing_documents.length === 0 ? <p className="text-sm text-fg-muted">Nothing outstanding.</p> : (
               <ul className="flex flex-col gap-2 text-sm">{d.missing_documents.map((f) => { const title = findingTitle(f); const detail = findingDetail(f, title); return <li key={f.id} className="flex gap-2"><StatusGlyph status="review_required" className="mt-1" /><div className="min-w-0"><p className="font-medium">{title}</p>{detail && <p className="text-fg-muted">{detail}</p>}<FindingActions title={title} /></div></li>; })}</ul>
@@ -274,6 +275,7 @@ export default function OverviewPage() {
             ) : <p className="text-sm text-fg-muted">No report generated yet.</p>}
           </Panel>
         </div>
+        </details>
       </div>
     </div>
   );

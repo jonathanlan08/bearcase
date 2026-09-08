@@ -80,6 +80,9 @@ export default function FinancialsPage() {
           </Table>
           <p className="mt-2 text-xs text-fg-muted">Accepted adjustments are added back to reported EBITDA. Rejected, unsupported, and review-required adjustments are excluded until a reviewer decides otherwise.</p>
         </Panel>
+        <details className="group rounded-[var(--radius-3)] border border-hairline bg-bg-raised">
+          <summary className="cursor-pointer list-none px-5 py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">Reference <span className="ml-2 font-normal text-fg-muted">deal metrics, cash-flow bridge, debt coverage, and the statement as mapped</span></summary>
+        <div className="flex flex-col gap-6 border-t border-hairline p-4">
         <section aria-labelledby="deal-metrics">
           <h2 id="deal-metrics" className="text-sm font-medium">Deal metrics</h2>
           <p className="mt-1 text-xs text-fg-muted">Computed by the deterministic engine from the mapped statements and the deal terms. Open “Formula and inputs” on any card to see exactly how.</p>
@@ -92,6 +95,8 @@ export default function FinancialsPage() {
           <Panel title="Debt service coverage"><DscrGauge value={latest(f, "dscr_base")?.value ?? null} threshold={String(latest(f, "covenant_dscr_threshold")?.value ?? "")} /><p className="mt-2 text-xs text-fg-muted">DSCR = CFADS ÷ annual debt service. EBITDA is never labeled CFADS; the bridge on the left shows every deduction.</p></Panel>
         </div>
         <StatementTable f={f} onCite={open} />
+        </div>
+        </details>
       </div>
       <DocumentViewer dealId={dealId} target={viewer} onClose={() => setViewer(null)} />
       <DecisionDialog dealId={dealId} adjustmentId={decide} onClose={() => setDecide(null)} f={f} />
@@ -114,8 +119,19 @@ function CheckWhatWeRead({ dealId, onCite }: { dealId: string; onCite: (eid: str
   const cov = m.coverage;
   const flagged = m.statements.flatMap((s) => (s.lines ?? []).filter((l) => l.needs_review).map((l) => ({ ...l, sheet: s.sheet })));
   const unread = cov.documents_failed + cov.documents_pending + cov.statements_unmapped + cov.unmapped_rows + cov.ambiguous_lines + cov.metrics_requiring_review;
+  const mappedStatement = m.statements.find((s) => s.mapped);
+  const summaryLine = mappedStatement
+    ? `${(mappedStatement.periods ?? []).length} years read, ${SCALE_LABEL[mappedStatement.scale ?? 1]?.split(" (")[0] ?? "scaled"}, ${(mappedStatement.lines ?? []).length} of ${LINES.length} lines, ${flagged.length === 0 ? "nothing flagged" : `${flagged.length} flagged`}${unread > 0 ? `, ${unread} item${unread === 1 ? "" : "s"} not checked` : ""}`
+    : "no statement was read";
   return (
-    <Panel title="Check what we read" id="check-read">
+    <details id="check-read" className="group rounded-[var(--radius-3)] border border-hairline bg-bg-raised" open={flagged.length > 0 || unread > 0}>
+      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-5 py-3 text-sm [&::-webkit-details-marker]:hidden">
+        <StatusGlyph status={flagged.length > 0 || cov.statements_unmapped > 0 ? "review_required" : "supported"} size={12} />
+        <span className="font-medium">Check what we read</span>
+        <span className="text-fg-muted">{summaryLine}</span>
+        <span className="ml-auto text-xs text-accent">details</span>
+      </summary>
+    <div className="border-t border-hairline p-5">
       <p className="text-sm text-fg-muted">Every figure below was read from a spreadsheet by rules, not by a person. Before relying on it, confirm the years, the scale, and the rows the rules picked. Anything the rules were unsure about is flagged; anything they could not read is listed.</p>
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="flex flex-col gap-4">
@@ -160,7 +176,8 @@ function CheckWhatWeRead({ dealId, onCite }: { dealId: string; onCite: (eid: str
           <p className="mt-3 text-xs text-fg-muted">{unread === 0 ? "Nothing is outstanding on the statements. The claims list and the report still need a person." : "Each count above is something a report reader would otherwise not know was left unread."}</p>
         </div>
       </div>
-    </Panel>
+    </div>
+    </details>
   );
 }
 

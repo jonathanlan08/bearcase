@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, X, Pencil, ExternalLink, Undo2, MessageSquareText } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { qk, useClaim, useClaims } from "@/components/app/hooks";
@@ -12,7 +12,7 @@ import { ConfidenceMeter, StatusChip, StatusGlyph, STATUS_LABEL } from "@/compon
 import { CitationChip } from "@/components/domain/citation";
 import { DocumentViewer, type ViewerTarget } from "@/components/domain/document-viewer";
 import { ACTION_VERB, CorrectionDialog, useReview } from "@/components/domain/review-dialog";
-import { fmtValue, fmtDateTime, titleCase } from "@/lib/format";
+import { fmtLocator, fmtValue, fmtDateTime, titleCase } from "@/lib/format";
 import { useMediaQuery } from "@/lib/hooks";
 import { askTheDeal } from "@/lib/chat-bus";
 import { api, type Claim, type ClaimDetail, type Link as EvLink } from "@/lib/api";
@@ -116,10 +116,7 @@ export default function ClaimsPage() {
                 <p className="mt-3 text-lg leading-snug">{d.claim_text}</p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {d.source_evidence && <CitationChip docType={d.doc_type} documentName={d.document_name} locator={d.source_evidence.locator} kind={d.source_evidence.kind} onClick={() => jumpToSource(d)} />}
-                  <ConfidenceMeter value={d.confidence} />
-                  {d.extraction_run && <span className="font-mono text-[11px] text-fg-muted">{String(d.extraction_run.provider)}/{String(d.extraction_run.model)} · prompt {String(d.extraction_run.prompt_version)} · schema {String(d.extraction_run.schema_version)}</span>}
                 </div>
-                <p className="mt-2 text-xs text-fg-muted">Confidence is how confident the extractor was that this sentence is a claim. It is not a measure of whether the claim is true; the status below is.</p>
               </div>
               <div className="grid grid-cols-2 gap-3 rounded-[var(--radius-3)] border border-hairline p-3 md:grid-cols-4">
                 <Stat label="Seller says" value={d.claimed_value !== null ? fmtValue(d.claimed_value, d.claimed_unit) : "—"} />
@@ -127,18 +124,15 @@ export default function ClaimsPage() {
                 <Stat label="Difference" value={d.claimed_value !== null && d.verified_value !== null ? delta(d) : "—"} />
                 <Stat label="Rule applied" value={d.status_rule ? d.status_rule.replace(/_/g, " ") : "—"} mono />
               </div>
-              <section>
-                <h2 className="text-sm font-semibold">How this status was decided</h2>
-                <p className="mt-2 text-sm">{d.status_rationale ?? "No rationale recorded."}</p>
-                {d.verified_metric && (
-                  <details className="mt-2 rounded-[var(--radius-2)] border border-hairline p-3 text-sm">
-                    <summary className="cursor-pointer text-sm font-medium">Calculation: {d.verified_metric.label}</summary>
-                    <p className="mt-2 text-xs text-fg-muted">Computed by the deterministic engine from the mapped statements, never by the model.</p>
-                    <p className="mt-2 font-mono text-xs">{d.verified_metric.formula ?? "extracted value"}</p>
-                    <pre className="mt-2 overflow-x-auto rounded-[var(--radius-1)] bg-bg-muted p-2 font-mono text-[11px]">{JSON.stringify(d.verified_metric.input_snapshot, null, 1)}</pre>
-                  </details>
-                )}
-              </section>
+              <AnswerTrace d={d} onOpen={(eid) => setViewer({ documentId: "", evidenceId: eid })} onSource={() => jumpToSource(d)} />
+              <details className="rounded-[var(--radius-2)] border border-hairline p-3 text-sm">
+                <summary className="cursor-pointer text-sm font-medium">How this claim was extracted</summary>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <ConfidenceMeter value={d.confidence} />
+                  {d.extraction_run && <span className="font-mono text-[11px] text-fg-muted">{String(d.extraction_run.provider)}/{String(d.extraction_run.model)} · prompt {String(d.extraction_run.prompt_version)} · schema {String(d.extraction_run.schema_version)}</span>}
+                </div>
+                <p className="mt-2 text-xs text-fg-muted">Confidence is how confident the extractor was that this sentence is a claim. It is not a measure of whether the claim is true; the status above is.</p>
+              </details>
               <EvidenceGroup title="Supporting evidence" role="supporting" links={d.links} onOpen={(l) => setViewer({ documentId: l.evidence.document_id, documentName: l.evidence.document_name, evidenceId: l.evidence.id, locator: l.evidence.locator, highlightIds: d.links.map((x) => x.evidence.id) })} />
               <EvidenceGroup title="Contradicting evidence" role="contradicting" links={d.links} onOpen={(l) => setViewer({ documentId: l.evidence.document_id, documentName: l.evidence.document_name, evidenceId: l.evidence.id, locator: l.evidence.locator, highlightIds: d.links.map((x) => x.evidence.id) })} />
               <section className="rounded-[var(--radius-3)] border border-hairline p-3">
@@ -184,6 +178,35 @@ const CONTEXT_PROMPTS: Array<[string, (d: ClaimDetail) => string]> = [
   ["Show the calculation", (d) => `Show how the checked figure for this claim was calculated: the formula, each input, and the cell or line each input came from. Do not recompute anything; describe the stored calculation.\nClaim: "${d.claim_text}"`],
   ["What would resolve this?", (d) => `What document or figure from the seller would settle this claim one way or the other, and how should I word the request?\nClaim: "${d.claim_text}"\nStatus: ${STATUS_LABEL[d.effective_status]}.`],
 ];
+
+/** The answer trace: source → extracted value → calculation → conclusion, each step openable. The one interaction that
+ *  shows a reader where a status came from without reading the whole page. */
+function AnswerTrace({ d, onOpen, onSource }: { d: ClaimDetail; onOpen: (eid: string) => void; onSource: () => void }) {
+  const m = d.verified_metric;
+  const contradicting = d.links.filter((l) => l.role === "contradicting");
+  const supporting = d.links.filter((l) => l.role === "supporting");
+  const inputs = m ? Object.entries(m.input_snapshot).filter(([k]) => !["sheet", "cell", "row", "document_id", "scale", "components"].includes(k)) : [];
+  const steps: Array<{ label: string; body: React.ReactNode }> = [
+    { label: "Source", body: <>{d.source_evidence ? <>The claim is a sentence in <button type="button" className="text-accent hover:underline" onClick={onSource}>{d.document_name}{fmtLocator(d.source_evidence.locator) ? `, ${fmtLocator(d.source_evidence.locator)}` : ""}</button>.</> : "No source location was recorded for this claim."}{d.claimed_value !== null && <> The seller&apos;s figure: <span className="num font-medium">{fmtValue(d.claimed_value, d.claimed_unit)}</span>.</>}</> },
+    { label: "What the documents hold", body: (contradicting.length + supporting.length) === 0 ? "No document in the deal room speaks to this claim, which is why it cannot be supported." : <ul className="space-y-1">{[...contradicting, ...supporting].slice(0, 4).map((l) => <li key={l.evidence.id}><button type="button" className="text-left hover:underline" onClick={() => onOpen(l.evidence.id)}><span className="font-medium">{l.evidence.document_name}</span>{fmtLocator(l.evidence.locator) ? `, ${fmtLocator(l.evidence.locator)}` : ""}</button>{l.role === "contradicting" && <span className="ml-2 text-xs text-red">contradicts</span>}{l.note && <span className="block text-xs text-fg-muted">{l.note}</span>}</li>)}</ul> },
+    { label: "Calculation", body: m ? <>{m.formula ? <p className="font-mono text-xs">{m.formula}</p> : <p>Read directly from the cell; no arithmetic.</p>}{inputs.length > 0 && <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">{inputs.map(([k, v]) => <Fragment key={k}><dt className="font-mono text-fg-muted">{k}</dt><dd className="num">{String(v)}</dd></Fragment>)}</dl>}<p className="mt-1 text-xs text-fg-muted">Computed by the deterministic engine from the mapped statements; the model never calculates. Result: <span className="num font-medium text-fg">{fmtValue(m.value, m.unit)}</span>.</p></> : "No calculation is involved; the status rests on the documents above." },
+    { label: "Conclusion", body: <><span className="font-medium">{STATUS_LABEL[d.status]}</span>{d.status_rule && <span className="ml-2 font-mono text-[11px] text-fg-muted">rule {d.status_rule.replace(/_/g, " ")}</span>}<p className="mt-1">{d.status_rationale ?? "No rationale recorded."}</p></> },
+  ];
+  return (
+    <section aria-label="How this answer was reached" className="rounded-[var(--radius-3)] border border-hairline p-3">
+      <h2 className="text-sm font-semibold">How this answer was reached</h2>
+      <ol className="mt-3 flex flex-col">
+        {steps.map((s, i) => (
+          <li key={s.label} className="relative flex gap-3 pb-4 last:pb-0">
+            {i < steps.length - 1 && <span aria-hidden className="absolute left-[9px] top-5 h-full w-px bg-hairline" />}
+            <span className="num relative z-[1] flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-hairline bg-bg-raised text-[11px]">{i + 1}</span>
+            <div className="min-w-0 text-sm"><p className="micro text-fg-muted">{s.label}</p><div className="mt-0.5">{s.body}</div></div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
 
 function askPrompt(d: ClaimDetail): string {
   const numbers = d.claimed_value !== null ? ` Seller says ${fmtValue(d.claimed_value, d.claimed_unit)}${d.verified_value !== null ? `; the documents show ${fmtValue(d.verified_value, d.verified_unit ?? d.claimed_unit)}` : ""}.` : "";
