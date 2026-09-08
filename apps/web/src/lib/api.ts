@@ -180,6 +180,16 @@ export const members = {
   accept: (token: string) => api.post<{ deal_id: string }>("/api/invites/accept", { token }),
 };
 
+export type ReplyOutcome = "answered" | "dodged" | "needs_document";
+export interface SellerReply { id: string; question_id: string; reply_text: string; outcome: ReplyOutcome; by: string | null; created_at: string }
+export interface SellerReplies { replies: Record<string, SellerReply>; totals: Record<ReplyOutcome, number> }
+export const sellerReplies = {
+  list: (dealId: string) => api.get<SellerReplies>(`/api/deals/${dealId}/seller-replies`),
+  record: (dealId: string, body: { question_id: string; question_text: string; reply_text: string; outcome: ReplyOutcome }) => api.post<SellerReply>(`/api/deals/${dealId}/seller-replies`, body),
+};
+/** What changed between two versions of a document (documents.py diff_versions). */
+export interface VersionDiff { document_id: string; document_name?: string; versions: number[]; comparable: boolean; reason?: string; old_version?: number; new_version?: number; kind?: "statement" | "text"; periods_before?: string[]; periods_after?: string[]; scale_before?: number; scale_after?: number; changes?: { period: string; line_key: string; before: string | null; after: string | null; cell: string | null; dependents: string[] }[]; claims_affected?: { id: string; text: string; status: string; metric_key: string | null }[]; added?: string[]; removed?: string[]; chunks_before?: number; chunks_after?: number; stale?: boolean }
+
 export const financials = {
   corrections: (dealId: string) => api.get<Correction[]>(`/api/deals/${dealId}/financials/corrections`),
   correct: (dealId: string, body: { line_key: string; period_label: string; value: string; note?: string }) => api.post<Correction>(`/api/deals/${dealId}/financials/corrections`, body),

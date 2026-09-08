@@ -360,6 +360,13 @@ class WaterfallStep(BaseModel):
     adjustment_id: uuid.UUID | None = None
 
 
+class SellerReplyRequest(BaseModel):
+    question_id: str = Field(min_length=1, max_length=80)
+    question_text: str = Field(min_length=1, max_length=2000)
+    reply_text: str = Field(min_length=1, max_length=8000)
+    outcome: Literal["answered", "dodged", "needs_document"]
+
+
 class CorrectionRequest(BaseModel):
     line_key: str = Field(min_length=1, max_length=64)
     period_label: str = Field(min_length=1, max_length=32)

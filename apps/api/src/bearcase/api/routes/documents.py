@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response, UploadFile
 from sqlalchemy import delete, func, select, update
@@ -32,7 +33,7 @@ from bearcase.models import (
     User,
 )
 from bearcase.models.base import utcnow
-from bearcase.models.enums import DocumentStatus, JobType
+from bearcase.models.enums import DocumentStatus, JobType, DocumentType
 from bearcase.pipeline.jobs import dispatch, enqueue_job
 
 log = logging.getLogger("bearcase.documents")
@@ -386,3 +387,114 @@ def get_job(job_id: uuid.UUID, db: DbDep, user: UserDep) -> ProcessingJob:
     if job is None:
         raise HTTPException(404, "Job not found.")
     return job
+
+
+@router.post("/deals/{deal_id}/documents/{document_id}/versions", response_model=DocumentOut, status_code=201)
+async def upload_new_version(deal: EditorDealDep, document_id: uuid.UUID, db: DbDep, user: UserDep, file: UploadFile, process: bool = True) -> DocumentOut:
+    """A revised copy of a document the seller already supplied (a restated statement, a corrected memo). Stored as
+    the next version; the earlier file is kept so the two can be compared. Re-reading replaces the evidence, and the
+    findings and metrics computed from the old copy stay until analysis is re-run, which the client should offer."""
+    doc = db.scalar(select(Document).where(Document.id == document_id, Document.deal_id == deal.id))
+    if doc is None:
+        raise HTTPException(404, "Document not found.")
+    s = get_settings()
+    data = await file.read(s.max_upload_bytes + 1)
+    if len(data) > s.max_upload_bytes:
+        raise HTTPException(413, f"The file is larger than {s.max_upload_bytes // (1024 * 1024)} MB.")
+    try:
+        v = validate_upload(file.filename or doc.display_name, file.content_type, data, s.max_upload_bytes)
+    except UploadRejected as exc:
+        raise HTTPException(422, str(exc)) from exc
+    current = db.get(DocumentVersion, doc.current_version_id) if doc.current_version_id else None
+    if current and current.sha256 == v.sha256:
+        raise HTTPException(422, "That file is identical to the current version.")
+    if current and current.extension != v.extension:
+        raise HTTPException(422, f"A new version must be the same kind of file ({current.extension}).")
+    version_no = (max((x.version_no for x in doc.versions), default=0)) + 1
+    key = make_object_key(deal.id, doc.id, version_no, v.sha256, v.extension)
+    get_storage().put(key, v.data)
+    version = DocumentVersion(document_id=doc.id, version_no=version_no, storage_key=key, sha256=v.sha256, size_bytes=v.size_bytes, extension=v.extension, mime_declared=v.mime_declared, mime_detected=v.mime_detected)
+    db.add(version)
+    db.flush()
+    doc.current_version_id = version.id
+    doc.status = DocumentStatus.UPLOADED
+    doc.status_detail = None
+    record(db, deal_id=deal.id, user_id=user.id, event_type="document.version_uploaded", object_type="document", object_id=doc.id, summary=f"Uploaded version {version_no} of {doc.display_name}", payload={"version_no": version_no, "sha256": v.sha256})
+    if process:
+        enqueue_job(db, deal_id=deal.id, job_type=JobType.PROCESS_DOCUMENT, document_id=doc.id)
+    db.commit()
+    db.refresh(doc)
+    return doc_out(db, doc)
+
+
+# Lines whose change moves these derived figures; used to say which calculations a revision touches.
+_DEPENDENTS: dict[str, list[str]] = {
+    "revenue": ["revenue_growth", "cagr", "gross_margin", "operating_margin", "customer_concentration_top1", "recurring_revenue_pct", "cfads_base", "dscr_base"],
+    "cost_of_goods_sold": ["gross_margin", "gross_profit"],
+    "gross_profit": ["gross_margin"],
+    "operating_expenses": ["operating_margin", "ebitda_reported"],
+    "ebitda": ["ebitda_reported", "ebitda_adjusted_verified", "ev_to_ebitda_verified", "debt_to_ebitda_verified", "cfads_base", "dscr_base"],
+    "net_income": ["ebitda_reported"],
+    "interest_expense": ["ebitda_reported"],
+    "income_tax_expense": ["ebitda_reported"],
+    "depreciation": ["ebitda_reported"],
+    "amortization": ["ebitda_reported"],
+    "operating_income": ["operating_margin"],
+}
+
+
+@router.get("/deals/{deal_id}/documents/{document_id}/diff")
+def diff_versions(deal: DealDep, document_id: uuid.UUID, db: DbDep, against: int | None = None) -> dict[str, Any]:
+    """What changed between the current version of a document and an earlier one. For a statement workbook the two
+    files are parsed and mapped the same way the pipeline maps them, and every mapped figure that differs is listed
+    with the calculations that depend on it and the claims that cite that line. For other files the comparison is
+    by page or row text. Nothing is written; re-running analysis is what refreshes the findings."""
+    from bearcase.ingest.parsers import parse_csv, parse_pdf, parse_xlsx
+    from bearcase.ingest.statement_mapper import map_income_statement
+
+    doc = db.scalar(select(Document).where(Document.id == document_id, Document.deal_id == deal.id))
+    if doc is None:
+        raise HTTPException(404, "Document not found.")
+    versions = sorted(doc.versions, key=lambda x: x.version_no)
+    if len(versions) < 2:
+        return {"document_id": str(doc.id), "versions": [x.version_no for x in versions], "comparable": False, "reason": "Only one version of this document exists."}
+    new = versions[-1]
+    old = next((x for x in versions if x.version_no == against), versions[-2]) if against else versions[-2]
+    storage = get_storage()
+
+    def parsed(v: DocumentVersion):  # type: ignore[no-untyped-def]
+        data = storage.get(v.storage_key)
+        if v.extension == "xlsx":
+            return parse_xlsx(data)
+        if v.extension == "csv":
+            return parse_csv(data)
+        return parse_pdf(data)
+
+    p_old, p_new = parsed(old), parsed(new)
+    out: dict[str, Any] = {"document_id": str(doc.id), "document_name": doc.display_name, "versions": [x.version_no for x in versions], "old_version": old.version_no, "new_version": new.version_no, "comparable": True}
+    if doc.doc_type == DocumentType.FINANCIAL_STATEMENTS or new.extension == "xlsx":
+        m_old, m_new = map_income_statement(p_old.chunks), map_income_statement(p_new.chunks)
+        changes: list[dict[str, Any]] = []
+        if m_old and m_new:
+            periods = sorted(set(m_old.periods) | set(m_new.periods), key=lambda p: p)
+            for period in periods:
+                keys = set(m_old.lines.get(period, {})) | set(m_new.lines.get(period, {}))
+                for key in sorted(keys):
+                    a = m_old.lines.get(period, {}).get(key)
+                    b = m_new.lines.get(period, {}).get(key)
+                    if (a.value if a else None) != (b.value if b else None):
+                        changes.append({"period": period, "line_key": key, "before": str(a.value) if a else None, "after": str(b.value) if b else None, "cell": b.cell if b else (a.cell if a else None), "dependents": _DEPENDENTS.get(key, [])})
+            out.update({"kind": "statement", "periods_before": m_old.periods, "periods_after": m_new.periods, "scale_before": m_old.scale, "scale_after": m_new.scale, "changes": changes})
+        else:
+            out.update({"kind": "statement", "changes": [], "reason": "One of the versions could not be read as an income statement."})
+        touched = {k for c in changes for k in (c["line_key"], *c["dependents"])}
+        claims = db.scalars(select(Claim).where(Claim.deal_id == deal.id, Claim.metric_key.in_(sorted(touched)))).all() if touched else []
+        out["claims_affected"] = [{"id": str(c.id), "text": c.claim_text[:140], "status": c.status.value, "metric_key": c.metric_key} for c in claims]
+    else:
+        old_text = [c.text for c in p_old.chunks]
+        new_text = [c.text for c in p_new.chunks]
+        added = [t for t in new_text if t not in set(old_text)]
+        removed = [t for t in old_text if t not in set(new_text)]
+        out.update({"kind": "text", "chunks_before": len(old_text), "chunks_after": len(new_text), "added": added[:40], "removed": removed[:40]})
+    out["stale"] = bool(out.get("changes") or out.get("added") or out.get("removed"))
+    return out

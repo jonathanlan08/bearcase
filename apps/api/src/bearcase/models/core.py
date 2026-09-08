@@ -165,6 +165,20 @@ class StatementCorrection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     user: Mapped[User] = relationship(foreign_keys=[user_id])
 
 
+class SellerReply(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """What the seller said back to one exported question, recorded by the buyer. Additive per question: the latest
+    row is the current state. `question_id` is the export's stable id ("finding:<uuid>" or "claim:<uuid>")."""
+
+    __tablename__ = "seller_replies"
+    deal_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    question_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    question_text: Mapped[str] = mapped_column(Text, nullable=False)
+    reply_text: Mapped[str] = mapped_column(Text, nullable=False)
+    outcome: Mapped[str] = mapped_column(String(20), nullable=False)  # answered | dodged | needs_document
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+
+
 class Purchase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A Stripe Checkout purchase. Created pending when the session is opened; the webhook marks it paid."""
 

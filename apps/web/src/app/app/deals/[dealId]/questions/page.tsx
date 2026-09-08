@@ -11,12 +11,14 @@ import { useSellerQuestions, wqk } from "@/components/app/workflow-hooks";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
 import { Button, buttonClass } from "@/components/ui/button";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/primitives";
-import { SeverityChip } from "@/components/domain/status";
+import { SeverityChip, StatusGlyph } from "@/components/domain/status";
 import { CitationChip } from "@/components/domain/citation";
 import { DocumentViewer, type ViewerTarget } from "@/components/domain/document-viewer";
 import { useToast } from "@/components/ui/toast";
 import { askTheDeal } from "@/lib/chat-bus";
-import { titleCase } from "@/lib/format";
+import { useSellerReplies } from "@/components/app/hooks";
+import { sellerReplies, type ReplyOutcome, type SellerReply } from "@/lib/api";
+import { titleCase, fmtDate } from "@/lib/format";
 
 const SEVERITY_ORDER = ["critical", "high", "medium", "low"];
 /** What each severity means for the buyer, as the group heading. */
@@ -72,6 +74,8 @@ export default function QuestionsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const questions = useSellerQuestions(dealId);
+  const replies = useSellerReplies(dealId);
+  const [replying, setReplying] = useState<string | null>(null);
   // Unchecked questions stay out of "Copy all"; everything is included until the user says otherwise.
   const [excluded, setExcluded] = useState<ReadonlySet<string>>(() => new Set());
   const [copied, setCopied] = useState(false);
@@ -163,7 +167,10 @@ export default function QuestionsPage() {
                           <div className="mt-2 flex flex-wrap gap-x-3" role="group" aria-label={`Actions for question ${n}`}>
                             <button type="button" className={ACTION} onClick={() => draft(q)}>Draft with the assistant</button>
                             {q.claim_id && <Link href={`${base}/claims?claim=${q.claim_id}`} className={ACTION}>Open the claim</Link>}
+                            <button type="button" className={ACTION} onClick={() => setReplying(replying === q.id ? null : q.id)}>{replies.data?.replies[q.id] ? "Update the seller’s reply" : "Record the seller’s reply"}</button>
                           </div>
+                          {replies.data?.replies[q.id] && replying !== q.id && <ReplyLine r={replies.data.replies[q.id]} />}
+                          {replying === q.id && <ReplyForm dealId={dealId} question={q} existing={replies.data?.replies[q.id] ?? null} onDone={() => setReplying(null)} />}
                         </div>
                       </li>
                     );
@@ -176,6 +183,44 @@ export default function QuestionsPage() {
       </div>
       <DocumentViewer dealId={dealId} target={viewer} onClose={() => setViewer(null)} />
     </div>
+  );
+}
+
+const OUTCOME_LABEL: Record<ReplyOutcome, string> = { answered: "Answered", dodged: "Not answered", needs_document: "Document requested" };
+const OUTCOME_STATUS: Record<ReplyOutcome, string> = { answered: "supported", dodged: "contradicted", needs_document: "review_required" };
+
+/** The seller's current reply to one question, and how the buyer read it. */
+function ReplyLine({ r }: { r: SellerReply }) {
+  return (
+    <p className="mt-2 rounded-[var(--radius-1)] border border-hairline bg-bg-raised px-3 py-2 text-sm">
+      <StatusGlyph status={OUTCOME_STATUS[r.outcome]} size={12} className="mr-1 inline align-middle" /><span className="font-medium">{OUTCOME_LABEL[r.outcome]}.</span> <span className="text-fg-muted">Seller said:</span> “{r.reply_text}” <span className="text-xs text-fg-muted">{r.by ?? "reviewer"}, {fmtDate(r.created_at)}</span>
+    </p>
+  );
+}
+
+/** Paste what the seller wrote back and say what it amounts to. Additive: a later reply supersedes, nothing is deleted. */
+function ReplyForm({ dealId, question, existing, onDone }: { dealId: string; question: SellerQuestion; existing: SellerReply | null; onDone: () => void }) {
+  const [text, setText] = useState(existing?.reply_text ?? "");
+  const [outcome, setOutcome] = useState<ReplyOutcome>(existing?.outcome ?? "answered");
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const m = useMutation({
+    mutationFn: () => sellerReplies.record(dealId, { question_id: question.id, question_text: question.question, reply_text: text.trim(), outcome }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: qk.replies(dealId) }); qc.invalidateQueries({ queryKey: qk.audit(dealId) }); toast({ title: "Reply recorded", tone: "success" }); onDone(); },
+    onError: (e) => toast({ title: "Could not record the reply", description: String(e), tone: "error" }),
+  });
+  return (
+    <form className="mt-2 flex flex-col gap-2 rounded-[var(--radius-1)] border border-hairline bg-bg-raised p-3" onSubmit={(e) => { e.preventDefault(); if (text.trim()) m.mutate(); }}>
+      <label className="text-xs text-fg-muted" htmlFor={`reply-${question.id}`}>What the seller said</label>
+      <textarea id={`reply-${question.id}`} className="min-h-[72px] rounded-[var(--radius-1)] border border-hairline bg-bg px-2 py-1.5 text-sm" value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the seller’s reply, or summarise the call." required />
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="text-xs text-fg-muted" htmlFor={`outcome-${question.id}`}>What it amounts to</label>
+        <select id={`outcome-${question.id}`} className="h-8 rounded-[var(--radius-1)] border border-hairline bg-bg px-2 text-sm" value={outcome} onChange={(e) => setOutcome(e.target.value as ReplyOutcome)}>
+          {(Object.keys(OUTCOME_LABEL) as ReplyOutcome[]).map((k) => <option key={k} value={k}>{OUTCOME_LABEL[k]}</option>)}
+        </select>
+        <span className="ml-auto flex gap-2"><Button type="button" size="sm" variant="secondary" onClick={onDone}>Cancel</Button><Button type="submit" size="sm" loading={m.isPending}>Save</Button></span>
+      </div>
+    </form>
   );
 }
 

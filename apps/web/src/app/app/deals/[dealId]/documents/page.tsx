@@ -5,7 +5,8 @@ import { useParams } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dialog } from "radix-ui";
-import { Upload, RefreshCw, Eye, ChevronDown, Trash2 } from "lucide-react";
+import { Upload, RefreshCw, Eye, ChevronDown, Trash2, GitCompare } from "lucide-react";
+import { useVersionDiff } from "@/components/app/hooks";
 import { api, ApiError, type DealSummary, type Doc, type Job } from "@/lib/api";
 import { useDocs, useInvalidateDeal, useJobs, useProcessDeal, useSummary, qk } from "@/components/app/hooks";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
@@ -44,6 +45,7 @@ export default function DocumentsPage() {
   // Deletion: a confirm step first, then the server removes the document, its evidence, and the claims that came from it.
   // Findings, metrics, and questions are not recomputed by the delete, so the reply's header asks for a re-run and the page keeps asking until one is queued.
   const [toDelete, setToDelete] = useState<Doc | null>(null);
+  const [compare, setCompare] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const invalidateDeal = useInvalidateDeal(dealId);
   const runAgain = () => process.mutate(true, { onSuccess: () => { setStale(false); toast({ title: "Analysis queued", description: "Claims, findings, metrics, and questions will be rebuilt from the documents that remain." }); } });
@@ -104,6 +106,7 @@ export default function DocumentsPage() {
                           <p className="font-medium">{d.display_name}</p>
                           <p className="text-xs text-fg-muted">{whatWasRead(d)}</p>
                           <TechnicalDetails d={d} />
+                          {compare === d.id && <VersionChanges dealId={dealId} docId={d.id} onReanalyse={() => { process.mutate(true, { onSuccess: () => { setCompare(null); toast({ title: "Analysis queued", description: "Figures and findings will be rebuilt from the revised copy." }); } }); }} />}
                         </td>
                         <td className={td}><span className="text-sm">{docTypeName(d.doc_type)}</span>{d.classification_confidence !== null && Number(d.classification_confidence) < 0.6 && <p className="text-xs text-amber">Unsure; check the type</p>}</td>
                         <td className={`${td} num whitespace-nowrap text-right`}>{d.version ? fmtBytes(d.version.size_bytes) : "—"}</td>
@@ -115,6 +118,8 @@ export default function DocumentsPage() {
                         <td className={`${td} whitespace-nowrap`}>
                           <button type="button" className="mr-1 inline-flex h-7 items-center gap-1 rounded-[var(--radius-1)] px-2 text-xs hover:bg-bg-muted disabled:opacity-40" onClick={() => setViewer({ documentId: d.id, documentName: d.display_name })} disabled={d.status !== "ready"}><Eye size={12} /> View</button>
                           <button type="button" className="mr-1 inline-flex h-7 items-center gap-1 rounded-[var(--radius-1)] px-2 text-xs hover:bg-bg-muted" onClick={() => reprocess.mutate(d.id)}><RefreshCw size={12} /> Read again</button>
+                          <RevisedCopy dealId={dealId} doc={d} />
+                          {(d.version?.version_no ?? 1) > 1 && <button type="button" className="mr-1 inline-flex h-7 items-center gap-1 rounded-[var(--radius-1)] px-2 text-xs hover:bg-bg-muted" onClick={() => setCompare(compare === d.id ? null : d.id)} aria-expanded={compare === d.id}><GitCompare size={12} /> {compare === d.id ? "Hide changes" : "What changed"}</button>}
                           <button type="button" className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-1)] px-2 text-xs text-fg-muted hover:bg-bg-muted hover:text-red disabled:opacity-40" onClick={() => setToDelete(d)} disabled={running} aria-label={`Delete ${d.display_name}`}><Trash2 size={12} /> Delete</button>
                         </td>
                       </tr>
@@ -147,6 +152,55 @@ export default function DocumentsPage() {
 }
 
 /** The confirm step before a document is deleted: what goes with it, in plain words, and what to do afterwards. */
+/** Upload a revised copy of one document as its next version; the earlier file is kept for comparison. */
+function RevisedCopy({ dealId, doc }: { dealId: string; doc: Doc }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const ref = useRef<HTMLInputElement>(null);
+  const m = useMutation({
+    mutationFn: (file: File) => { const fd = new FormData(); fd.append("file", file); return api.post<Doc>(`/api/deals/${dealId}/documents/${doc.id}/versions`, fd); },
+    onSuccess: (d) => { qc.invalidateQueries({ queryKey: qk.docs(dealId) }); qc.invalidateQueries({ queryKey: qk.jobs(dealId) }); toast({ title: `Version ${d.version?.version_no ?? ""} uploaded`, description: "The new copy is being read. Findings computed from the old copy stay until you re-run analysis; open “What changed” to see what moved.", tone: "success" }); },
+    onError: (e) => toast({ title: "Revised copy rejected", description: e instanceof ApiError ? e.message : String(e), tone: "error" }),
+  });
+  return (
+    <>
+      <button type="button" className="mr-1 inline-flex h-7 items-center gap-1 rounded-[var(--radius-1)] px-2 text-xs hover:bg-bg-muted" onClick={() => ref.current?.click()} disabled={m.isPending}><Upload size={12} /> Revised copy</button>
+      <input ref={ref} type="file" accept=".pdf,.xlsx,.csv" className="sr-only" aria-label={`Upload a revised copy of ${doc.display_name}`} onChange={(e) => { const f = e.target.files?.[0]; if (f) m.mutate(f); e.target.value = ""; }} />
+    </>
+  );
+}
+
+const LINE_NAMES: Record<string, string> = { revenue: "Revenue", cost_of_goods_sold: "Cost of goods sold", gross_profit: "Gross profit", operating_expenses: "Total operating expenses", ebitda: "EBITDA", net_income: "Net income", depreciation: "Depreciation", amortization: "Amortization", interest_expense: "Interest expense", income_tax_expense: "Income tax expense", operating_income: "Operating income", income_before_tax: "Income before tax" };
+const DEP_NAMES: Record<string, string> = { revenue_growth: "revenue growth", cagr: "revenue CAGR", gross_margin: "gross margin", operating_margin: "operating margin", customer_concentration_top1: "largest customer share", recurring_revenue_pct: "recurring revenue share", cfads_base: "CFADS", dscr_base: "DSCR", ebitda_reported: "reported EBITDA", ebitda_adjusted_verified: "checked adjusted EBITDA", ev_to_ebitda_verified: "EV / EBITDA", debt_to_ebitda_verified: "debt / EBITDA", gross_profit: "gross profit" };
+
+/** What changed between the current version and the one before: every mapped figure that moved, what depends on it, and the claims that cite it. */
+function VersionChanges({ dealId, docId, onReanalyse }: { dealId: string; docId: string; onReanalyse: () => void }) {
+  const q = useVersionDiff(dealId, docId);
+  if (q.isPending) return <p className="px-3 py-2 text-xs text-fg-muted">Comparing versions…</p>;
+  if (q.isError || !q.data) return <p className="px-3 py-2 text-xs text-red">The versions could not be compared.</p>;
+  const d = q.data;
+  if (!d.comparable) return <p className="px-3 py-2 text-xs text-fg-muted">{d.reason}</p>;
+  return (
+    <div className="mx-3 mb-3 rounded-[var(--radius-2)] border border-hairline bg-bg-raised p-3 text-sm">
+      <p className="text-xs text-fg-muted">Version {d.old_version} → version {d.new_version}{d.kind === "statement" && d.scale_before !== d.scale_after ? `; scale changed from ×${d.scale_before} to ×${d.scale_after}` : ""}{d.kind === "statement" && JSON.stringify(d.periods_before) !== JSON.stringify(d.periods_after) ? `; years ${d.periods_before?.join(", ")} → ${d.periods_after?.join(", ")}` : ""}.</p>
+      {d.kind === "statement" && (d.changes?.length ?? 0) === 0 && <p className="mt-1">No mapped figure changed.</p>}
+      {d.kind === "statement" && (d.changes?.length ?? 0) > 0 && (
+        <ul className="mt-2 space-y-1.5">
+          {d.changes!.map((c) => (
+            <li key={`${c.period}|${c.line_key}`}>
+              <span className="font-medium">{LINE_NAMES[c.line_key] ?? c.line_key}</span> <span className="text-fg-muted">{c.period}{c.cell ? `, cell ${c.cell}` : ""}</span>: <span className="num text-fg-muted line-through">{fmtMoney(c.before)}</span> <span className="num">{fmtMoney(c.after)}</span>
+              {c.dependents.length > 0 && <span className="block text-xs text-fg-muted">Moves {c.dependents.map((k) => DEP_NAMES[k] ?? k).join(", ")}.</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {d.kind === "text" && <p className="mt-1">{d.added?.length ?? 0} passages added, {d.removed?.length ?? 0} removed ({d.chunks_before} → {d.chunks_after} read).</p>}
+      {(d.claims_affected?.length ?? 0) > 0 && <p className="mt-2 text-xs text-fg-muted">Claims that cite these lines: {d.claims_affected!.map((c) => `“${c.text.slice(0, 60)}…”`).join("; ")}</p>}
+      {d.stale && <div className="mt-2 flex flex-wrap items-center gap-2"><StatusGlyph status="review_required" size={12} /><span className="text-xs">The findings and figures were computed from the old copy.</span><Button size="sm" variant="secondary" onClick={onReanalyse}>Re-run analysis</Button></div>}
+    </div>
+  );
+}
+
 function DeleteDialog({ doc, pending, onCancel, onConfirm }: { doc: Doc | null; pending: boolean; onCancel: () => void; onConfirm: () => void }) {
   return (
     <Dialog.Root open={!!doc} onOpenChange={(o) => { if (!o && !pending) onCancel(); }}>

@@ -29,6 +29,7 @@ from bearcase.api.routes import (
     questions_seller,
     reports,
     scenarios,
+    summary_pdf,
 )
 from bearcase.chat.providers import effective_backend
 from bearcase.config import get_settings
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
         audit.router,
         questions.router,
         questions_seller.router,
+        summary_pdf.router,
         insights.router,
         chat.router,
         members.router,

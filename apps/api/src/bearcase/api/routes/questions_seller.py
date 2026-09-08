@@ -5,13 +5,19 @@ questions" section uses, so the page, the file, and the report always agree. No 
 
 from __future__ import annotations
 
+import uuid
+
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Response
 
-from bearcase.api.deps import DbDep, DealDep, UserDep
+from bearcase.api.deps import EditorDealDep, DbDep, DealDep, UserDep
+from bearcase.api.schemas import SellerReplyRequest
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from bearcase.audit import record
-from bearcase.models import Deal
+from bearcase.models import Deal, SellerReply
 from bearcase.reports.assemble import build_seller_questions
 
 router = APIRouter(tags=["seller-questions"])
@@ -56,8 +62,12 @@ def _preamble(deal: Deal, generated_from: dict[str, int]) -> str:
     )
 
 
+OUTCOME_LABEL = {"answered": "Answered", "dodged": "Not answered", "needs_document": "Document requested"}
+
+
 def to_markdown(deal: Deal, data: dict[str, Any]) -> str:
     lines = [f"# Questions for the seller: {deal.company_name}", "", _preamble(deal, data["generated_from"]), ""]
+    replies = data.get("replies", {})
     n = 0
     for heading, rows in _grouped(data["questions"]):
         lines.extend([f"## {heading}", ""])
@@ -67,6 +77,9 @@ def to_markdown(deal: Deal, data: dict[str, Any]) -> str:
             lines.append(f"   {KIND_LABELS.get(q['kind'], q['kind'])}. {q['why']}  ")
             if q["document_names"]:
                 lines.append(f"   Documents: {', '.join(q['document_names'])}")
+            rep = replies.get(q["id"])
+            if rep:
+                lines.append(f"   Seller's reply ({OUTCOME_LABEL.get(rep['outcome'], rep['outcome'])}): {rep['reply_text']}")
             lines.append("")
     if n == 0:
         lines.extend(["No open questions: every seller statement was supported and no document was missing.", ""])
@@ -104,6 +117,7 @@ def export_seller_questions(
     if format not in {"md", "txt"}:
         raise HTTPException(400, "format must be md or txt.")
     data = build_seller_questions(db, deal)
+    data = {**data, "replies": latest_replies(db, deal.id)}
     if ids is not None:
         wanted = {i.strip() for i in ids.split(",") if i.strip()}
         data = {**data, "questions": [q for q in data["questions"] if q["id"] in wanted]}
@@ -126,3 +140,52 @@ def export_seller_questions(
         media_type="text/markdown; charset=utf-8" if format == "md" else "text/plain; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+def latest_replies(db: Session, deal_id: uuid.UUID) -> dict[str, dict[str, Any]]:
+    """The current reply per question id (the newest row wins)."""
+    out: dict[str, dict[str, Any]] = {}
+    for r in db.scalars(select(SellerReply).where(SellerReply.deal_id == deal_id).order_by(SellerReply.created_at)):
+        out[r.question_id] = {
+            "id": str(r.id),
+            "question_id": r.question_id,
+            "reply_text": r.reply_text,
+            "outcome": r.outcome,
+            "by": r.user.display_name if r.user else None,
+            "created_at": r.created_at.isoformat(),
+        }
+    return out
+
+
+@router.get("/deals/{deal_id}/seller-replies")
+def list_seller_replies(deal: DealDep, db: DbDep) -> dict[str, Any]:
+    """What the seller has said back so far, keyed by question id, plus totals by outcome."""
+    replies = latest_replies(db, deal.id)
+    totals = {"answered": 0, "dodged": 0, "needs_document": 0}
+    for r in replies.values():
+        totals[r["outcome"]] = totals.get(r["outcome"], 0) + 1
+    return {"replies": replies, "totals": totals}
+
+
+@router.post("/deals/{deal_id}/seller-replies", status_code=201)
+def record_seller_reply(deal: EditorDealDep, body: SellerReplyRequest, db: DbDep, user: UserDep) -> dict[str, Any]:
+    """Record what the seller replied to one question and how the buyer reads it. Additive: a later reply to the
+    same question supersedes without deleting. The question's text is stored with it, so the record survives a
+    re-analysis that renumbers or drops the question."""
+    if not (body.question_id.startswith("finding:") or body.question_id.startswith("claim:")):
+        raise HTTPException(422, "question_id must be a finding:<id> or claim:<id> from the questions list.")
+    row = SellerReply(deal_id=deal.id, user_id=user.id, question_id=body.question_id, question_text=body.question_text, reply_text=body.reply_text, outcome=body.outcome)
+    db.add(row)
+    db.flush()
+    record(
+        db,
+        deal_id=deal.id,
+        user_id=user.id,
+        event_type="seller_reply.recorded",
+        object_type="seller_reply",
+        object_id=row.id,
+        summary=f"Recorded the seller's reply ({OUTCOME_LABEL.get(body.outcome, body.outcome)}) to: {body.question_text[:90]}",
+        payload={"question_id": body.question_id, "outcome": body.outcome},
+    )
+    db.commit()
+    return latest_replies(db, deal.id)[body.question_id]

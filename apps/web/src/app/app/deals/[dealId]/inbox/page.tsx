@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { useReviewQueue } from "@/components/app/hooks";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/primitives";
@@ -32,10 +33,26 @@ export default function InboxPage() {
   const kicker = useDealKicker();
   const q = useReviewQueue(dealId);
   const base = `/app/deals/${dealId}`;
+  const router = useRouter();
+  // Keyboard review: J/K move through every item across groups, Enter opens it; the active row is marked, not only coloured.
+  const flat = useMemo(() => (q.data?.groups ?? []).flatMap((g) => g.items), [q.data]);
+  const [active, setActive] = useState(0);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      if (e.key === "j" || e.key === "J") { e.preventDefault(); setActive((i) => Math.min(flat.length - 1, i + 1)); }
+      else if (e.key === "k" || e.key === "K") { e.preventDefault(); setActive((i) => Math.max(0, i - 1)); }
+      else if (e.key === "Enter" && flat[active]) { e.preventDefault(); router.push(href(base, flat[active])); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [flat, active, router, base]);
+  useEffect(() => { document.getElementById(`queue-item-${active}`)?.scrollIntoView({ block: "nearest" }); }, [active]);
   return (
     <div>
       <PageHeader kicker={kicker} title="Review queue">
-        <p className="mt-2 max-w-3xl text-sm text-fg-muted">What still needs a person, in the order to do it. Items leave the queue when you record a decision or upload what is missing; nothing here is decided for you.</p>
+        <p className="mt-2 max-w-3xl text-sm text-fg-muted">What still needs a person, in the order to do it. Items leave the queue when you record a decision or upload what is missing; nothing here is decided for you. <span className="hidden lg:inline">Keys: <kbd className="rounded border border-hairline px-1 font-mono text-[11px]">J</kbd> <kbd className="rounded border border-hairline px-1 font-mono text-[11px]">K</kbd> move, <kbd className="rounded border border-hairline px-1 font-mono text-[11px]">Enter</kbd> open.</span></p>
       </PageHeader>
       <div className="flex flex-col gap-4 p-4 md:p-6">
         {q.isPending && <><Skeleton className="h-24" /><Skeleton className="h-24" /></>}
@@ -54,8 +71,8 @@ export default function InboxPage() {
                 <p className="px-5 pb-3 text-xs text-fg-muted">{GROUP_HINT[g.key]}</p>
                 {g.items.length === 0 ? <p className="border-t border-hairline px-5 py-3 text-sm text-fg-muted"><StatusGlyph status="supported" size={12} className="mr-1 inline align-middle" />Nothing here.</p> : (
                   <ol className="divide-y divide-hairline border-t border-hairline">
-                    {g.items.map((item) => (
-                      <li key={item.id} className="flex items-start gap-3 px-5 py-3 text-sm">
+                    {g.items.map((item) => { const idx = flat.indexOf(item); const isActive = idx === active; return (
+                      <li key={item.id} id={`queue-item-${idx}`} aria-current={isActive ? "true" : undefined} className={`flex items-start gap-3 px-5 py-3 text-sm ${isActive ? "border-l-2 border-accent bg-bg-muted/40" : "border-l-2 border-transparent"}`}>
                         <StatusGlyph status={item.status ?? "review_required"} className="mt-1" />
                         <div className="min-w-0 flex-1">
                           <Link href={href(base, item)} className="font-medium hover:underline">{item.title}</Link>
@@ -65,7 +82,7 @@ export default function InboxPage() {
                         </div>
                         <Link href={href(base, item)} className="shrink-0 text-xs text-accent hover:underline">Open</Link>
                       </li>
-                    ))}
+                    ); })}
                   </ol>
                 )}
               </section>

@@ -1,5 +1,7 @@
 "use client";
 
+import { useMutation } from "@tanstack/react-query";
+
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useClaims, useSummary, useProcessDeal } from "@/components/app/hooks";
@@ -12,7 +14,7 @@ import { fmtMoney, fmtX, fmtDate, titleCase } from "@/lib/format";
 import { useToast } from "@/components/ui/toast";
 import { askTheDeal } from "@/lib/chat-bus";
 import { ShareButton } from "@/components/domain/share-panel";
-import type { Finding, ProgressKey } from "@/lib/api";
+import { api, type Finding, type ProgressKey } from "@/lib/api";
 
 const ORDER = ["supported", "contradicted", "review_required", "unsupported"] as const;
 
@@ -80,6 +82,23 @@ const verb = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 /** Engine text carries raw Decimals ("22.00772201", "10.00000000", "0E-8") and bare dollar amounts; round to two places and add separators. */
 const trimDecimal = (n: number) => (Number.isFinite(n) ? n.toFixed(2).replace(/\.?0+$/, "") : "n/a");
+/** The one-page summary: what gets forwarded to a lender or a lawyer. Fetched with the session, then handed to the browser's save dialog. */
+export function SummaryPdfButton({ dealId }: { dealId: string }) {
+  const { toast } = useToast();
+  const m = useMutation({
+    mutationFn: () => api.download(`/api/deals/${dealId}/summary.pdf`, "bearcase-summary.pdf"),
+    onSuccess: ({ blob, filename }) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast({ title: "One-page summary downloaded", description: filename, tone: "success" });
+    },
+    onError: (e) => toast({ title: "Could not build the summary", description: String(e), tone: "error" }),
+  });
+  return <Button variant="secondary" size="sm" onClick={() => m.mutate()} loading={m.isPending}>One-page PDF</Button>;
+}
+
 /** The confidence budget: what the claims rest on. One line, four counts, no colour needed. */
 export function ConfidenceLine({ c, className = "" }: { c: Record<string, number>; className?: string }) {
   if (!c || !c.total) return null;
@@ -181,6 +200,7 @@ export default function OverviewPage() {
           {running && <span className="text-xs font-medium text-amber" aria-live="polite">{d.active_jobs} job{d.active_jobs > 1 ? "s" : ""} running…</span>}
           {!d.deal.is_demo && <ShareButton dealId={dealId} />}
           <Button variant="secondary" size="sm" onClick={() => runAnalysis(true)} loading={process.isPending} disabled={noDocs}>Re-run analysis</Button>
+          {total > 0 && <SummaryPdfButton dealId={dealId} />}
         </>
       } />
       <div className="flex flex-col gap-4 p-4 md:p-6">

@@ -7,7 +7,7 @@ import { Download, RefreshCw } from "lucide-react";
 import { api, type Evidence, type ReportSection } from "@/lib/api";
 import { useEvidence, useJobs, useReport, qk } from "@/components/app/hooks";
 import { useSummary } from "@/components/app/hooks";
-import { ConfidenceLine } from "../page";
+import { ConfidenceLine, SummaryPdfButton } from "../page";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
 import { Button, buttonClass } from "@/components/ui/button";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/primitives";
@@ -45,6 +45,7 @@ export default function ReportPage() {
     <div>
       <PageHeader kicker={kicker} title="Red-Team Report" actions={
         <>
+          <SummaryPdfButton dealId={dealId} />
           <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={() => generate.mutate()} loading={generate.isPending || running}>{r ? "Regenerate" : "Generate report"}</Button>
           {r && r.status === "validated" && (<><a className={buttonClass("secondary", "sm")} href={`/api/deals/${dealId}/reports/${r.id}/export?format=md`}><Download size={14} /> Markdown</a><a className={buttonClass("secondary", "sm")} href={`/api/deals/${dealId}/reports/${r.id}/export?format=pdf`}><Download size={14} /> PDF</a></>)}
         </>
