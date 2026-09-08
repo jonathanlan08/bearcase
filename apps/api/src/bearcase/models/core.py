@@ -148,6 +148,23 @@ class DealMember(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     user: Mapped[User | None] = relationship(foreign_keys=[user_id])
 
 
+class StatementCorrection(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A person's correction of one mapped statement figure. Additive: the extracted metric row is never edited;
+    the correction is applied when the deal is re-analysed, the original value is kept here, and `impact` records
+    what changed as a result so the correction stays explainable."""
+
+    __tablename__ = "statement_corrections"
+    deal_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    line_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    period_label: Mapped[str] = mapped_column(String(32), nullable=False)
+    original_value: Mapped[Decimal | None] = mapped_column(Ratio)
+    corrected_value: Mapped[Decimal] = mapped_column(Ratio, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    impact: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+
+
 class Purchase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A Stripe Checkout purchase. Created pending when the session is opened; the webhook marks it paid."""
 

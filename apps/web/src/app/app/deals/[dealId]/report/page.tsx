@@ -6,6 +6,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Download, RefreshCw } from "lucide-react";
 import { api, type Evidence, type ReportSection } from "@/lib/api";
 import { useEvidence, useJobs, useReport, qk } from "@/components/app/hooks";
+import { useSummary } from "@/components/app/hooks";
+import { ConfidenceLine } from "../page";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
 import { Button, buttonClass } from "@/components/ui/button";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/primitives";
@@ -24,6 +26,7 @@ export default function ReportPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const report = useReport(dealId);
+  const summary = useSummary(dealId);
   const jobs = useJobs(dealId);
   const running = jobs.data?.some((j) => j.job_type === "generate_report" && (j.status === "queued" || j.status === "running")) ?? false;
   const generate = useMutation({ mutationFn: () => api.post(`/api/deals/${dealId}/report`), onSuccess: () => { qc.invalidateQueries({ queryKey: qk.jobs(dealId) }); toast({ title: "Report generation queued" }); window.setTimeout(() => qc.invalidateQueries({ queryKey: qk.report(dealId) }), 2500); } });
@@ -56,6 +59,7 @@ export default function ReportPage() {
         )}
         {r && (
           <div className="mt-3 max-w-3xl">
+            {summary.data && <ConfidenceLine c={summary.data.confidence} className="mt-0 mb-2" />}
             <StatementKindsLegend />
             <p className="mt-1.5 text-xs text-fg-muted">A citation shows where a statement came from, not that the statement is correct. Open the source before you rely on it.</p>
           </div>

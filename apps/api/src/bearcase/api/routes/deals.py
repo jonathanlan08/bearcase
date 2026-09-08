@@ -24,7 +24,7 @@ from bearcase.models import (
     ReviewDecision,
     Scenario,
 )
-from bearcase.models.enums import DocumentStatus, FindingKind, JobStatus, JobType, PurchasePriceBasis
+from bearcase.models.enums import DocumentStatus, FindingKind, JobStatus, JobType, PurchasePriceBasis, ClaimStatus
 from bearcase.pipeline.jobs import dispatch, enqueue_job
 
 router = APIRouter(prefix="/deals", tags=["deals"])
@@ -140,7 +140,17 @@ def deal_summary(deal: DealDep, db: DbDep) -> DealSummary:
         [fnd for fnd in findings if fnd.kind != FindingKind.MISSING_DOCUMENT],
         key=lambda x: (sev_rank[x.severity.value], x.created_at),
     )[:6]
+    decided_ids = {d.claim_id for d in db.scalars(select(ReviewDecision).where(ReviewDecision.deal_id == deal.id, ReviewDecision.is_current.is_(True)))}
+    all_claims = db.scalars(select(Claim).where(Claim.deal_id == deal.id)).all()
+    confidence = {
+        "decided": sum(1 for c in all_claims if c.id in decided_ids),
+        "rules_only": sum(1 for c in all_claims if c.id not in decided_ids and c.status in (ClaimStatus.SUPPORTED, ClaimStatus.CONTRADICTED)),
+        "needs_person": sum(1 for c in all_claims if c.id not in decided_ids and c.status in (ClaimStatus.REVIEW_REQUIRED, ClaimStatus.PENDING)),
+        "no_evidence": sum(1 for c in all_claims if c.id not in decided_ids and c.status == ClaimStatus.UNSUPPORTED),
+        "total": len(all_claims),
+    }
     return DealSummary(
+        confidence=confidence,
         deal=DealOut.model_validate(deal),
         documents=docs,
         claim_counts=counts,

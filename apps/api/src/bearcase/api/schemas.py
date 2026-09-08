@@ -360,6 +360,13 @@ class WaterfallStep(BaseModel):
     adjustment_id: uuid.UUID | None = None
 
 
+class CorrectionRequest(BaseModel):
+    line_key: str = Field(min_length=1, max_length=64)
+    period_label: str = Field(min_length=1, max_length=32)
+    value: Decimal
+    note: str | None = Field(default=None, max_length=2000)
+
+
 class FinancialsOut(BaseModel):
     periods: list[PeriodOut]
     metrics: list[MetricOut]
@@ -480,6 +487,8 @@ class DealSummary(BaseModel):
     latest_report: dict[str, Any] | None
     active_jobs: int
     mode: dict[str, str]
+    # The confidence budget: how many claims rest on a person's decision, on rules alone, or on nothing.
+    confidence: dict[str, int] = Field(default_factory=dict)
 
 
 class ProcessResponse(BaseModel):

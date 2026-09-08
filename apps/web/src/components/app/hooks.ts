@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Claim, type ClaimDetail, type Deal, type DealListItem, type DealSummary, type Doc, type Financials, type Finding, type Job, type Report, type Scenario, type ScenarioFacts, type AuditEvent, type Evidence, type StatementMapping, type ReviewQueue } from "@/lib/api";
+import { api, type Claim, type ClaimDetail, type Deal, type DealListItem, type DealSummary, type Doc, type Financials, type Finding, type Job, type Report, type Scenario, type ScenarioFacts, type AuditEvent, type Evidence, type StatementMapping, type ReviewQueue, financials } from "@/lib/api";
 
 export const qk = {
   me: ["me"] as const,
@@ -21,6 +21,7 @@ export const qk = {
   evidence: (id: string, eid: string) => ["evidence", id, eid] as const,
   mapping: (id: string) => ["mapping", id] as const,
   queue: (id: string) => ["queue", id] as const,
+  corrections: (id: string) => ["corrections", id] as const,
   docEvidence: (id: string, did: string) => ["docEvidence", id, did] as const,
 };
 
@@ -39,6 +40,7 @@ export const useFacts = (id: string) => useQuery({ queryKey: qk.facts(id), query
 export const useReport = (id: string) => useQuery({ queryKey: qk.report(id), queryFn: () => api.get<Report | null>(`/api/deals/${id}/report`) });
 export const useFindings = (id: string) => useQuery({ queryKey: qk.findings(id), queryFn: () => api.get<Finding[]>(`/api/deals/${id}/findings`) });
 export const useAudit = (id: string) => useQuery({ queryKey: qk.audit(id), queryFn: () => api.get<AuditEvent[]>(`/api/deals/${id}/audit`) });
+export const useCorrections = (id: string) => useQuery({ queryKey: qk.corrections(id), queryFn: () => financials.corrections(id) });
 export const useReviewQueue = (id: string) => useQuery({ queryKey: qk.queue(id), queryFn: () => api.get<ReviewQueue>(`/api/deals/${id}/review-queue`) });
 export const useStatementMapping = (id: string) => useQuery({ queryKey: qk.mapping(id), queryFn: () => api.get<StatementMapping>(`/api/deals/${id}/financials/mapping`) });
 export const useEvidence = (id: string, eid: string | null) => useQuery({ queryKey: qk.evidence(id, eid ?? ""), queryFn: () => api.get<Evidence>(`/api/deals/${id}/evidence/${eid}`), enabled: !!eid });

@@ -80,6 +80,16 @@ const verb = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 /** Engine text carries raw Decimals ("22.00772201", "10.00000000", "0E-8") and bare dollar amounts; round to two places and add separators. */
 const trimDecimal = (n: number) => (Number.isFinite(n) ? n.toFixed(2).replace(/\.?0+$/, "") : "n/a");
+/** The confidence budget: what the claims rest on. One line, four counts, no colour needed. */
+export function ConfidenceLine({ c, className = "" }: { c: Record<string, number>; className?: string }) {
+  if (!c || !c.total) return null;
+  return (
+    <p className={`mt-4 text-sm text-fg-muted ${className}`}>
+      Of <span className="num text-fg">{c.total}</span> claims, <span className="num text-fg">{c.decided}</span> rest on your decisions, <span className="num text-fg">{c.rules_only}</span> on rules alone, <span className="num text-fg">{c.needs_person}</span> {c.needs_person === 1 ? "needs" : "need"} a person, and <span className="num text-fg">{c.no_evidence}</span> {c.no_evidence === 1 ? "has" : "have"} no evidence.
+    </p>
+  );
+}
+
 function tidyNumbers(s: string): string {
   return s
     .replace(/\b\d+(?:\.\d+)?[Ee][-+]?\d+\b/g, (m) => trimDecimal(Number(m)))
@@ -178,6 +188,7 @@ export default function OverviewPage() {
           <h2 id="start-heading" className="text-xl">{start.heading}</h2>
           <p className="mt-2 max-w-3xl text-sm text-fg-muted">{start.body}</p>
           <div className="mt-4 flex flex-wrap gap-2">{start.actions}</div>
+          {total > 0 && <ConfidenceLine c={d.confidence} />}
           <details className="mt-4 text-sm">
             <summary className="cursor-pointer text-accent">New to these numbers?</summary>
             <dl className="mt-3 grid gap-3 md:grid-cols-2">

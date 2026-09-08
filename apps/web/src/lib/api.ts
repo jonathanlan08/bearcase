@@ -99,7 +99,10 @@ export interface Adjustment { id: string; key: string; label: string; amount: st
 export interface WaterfallStep { label: string; amount: string; decision: string; included: boolean; running_total: string; adjustment_id: string | null }
 export interface Financials { periods: Period[]; metrics: Metric[]; adjustments: Adjustment[]; waterfall: WaterfallStep[] }
 /** "Check what we read": how each statement sheet was interpreted (api/routes/financials.py statement_mapping). */
-export interface MappedCell { value: string; raw: string; cell: string; confidence: number; evidence_id: string | null }
+export interface CorrectionImpact { metrics: { key: string; period: string; label: string; unit: Unit; before: string | null; after: string | null }[]; findings_added: { key: string; title: string; severity: string }[]; findings_removed: { key: string; title: string; severity: string }[]; findings_changed: { key: string; title: string; before: string; after: string }[]; claims_changed: { key: string; text: string; before: string; after: string }[] }
+/** A person's correction of one mapped figure (api/routes/financials.py correct_figure). Additive; the original stays. */
+export interface Correction { id: string; line_key: string; period_label: string; original_value: string | null; corrected_value: string; note: string | null; by: string | null; created_at: string; impact: CorrectionImpact }
+export interface MappedCell { value: string; raw: string; cell: string; confidence: number; evidence_id: string | null; correction: Correction | null }
 export interface MappedLine { key: string; cells: Record<string, MappedCell>; components: string[] | null; needs_review: boolean }
 export interface MappedStatement { document_id: string; document_name: string; mapped: boolean; reason?: string; sheet?: string; header_row?: number | null; scale?: number; currency?: string; periods?: { label: string; year: number | null }[]; lines?: MappedLine[]; unmapped_rows?: { row: number; label: string }[] }
 export interface Coverage { documents_ready: number; documents_failed: number; documents_pending: number; statements_mapped: number; statements_unmapped: number; unmapped_rows: number; ambiguous_lines: number; metrics_requiring_review: number; claims_by_status: Record<string, number> }
@@ -123,7 +126,7 @@ export interface ReportStatement { text: string; evidence_ids: string[]; metric_
 export interface ReportSection { key: string; title: string; kind: string; statements: ReportStatement[]; table: { columns?: string[]; rows?: Array<{ label: string; cells: string[]; evidence_ids: string[]; metric_ids?: string[]; [k: string]: unknown }> }; derived_from: string[] }
 export interface Report { id: string; deal_id: string; version_no: number; status: string; outcome: string; sections: ReportSection[]; validation: { valid: boolean; statements_total: number; material_statements: number; material_cited: number; uncited: Array<{ section: string; index: number; text: string }>; unresolved: unknown[] }; provider: string; model: string; prompt_version: string; schema_version: string; engine_version: string; input_snapshot: Record<string, unknown>; created_at: string }
 export interface AuditEvent { id: string; event_type: string; object_type: string; object_id: string | null; summary: string; payload: Record<string, unknown>; user_name: string; created_at: string }
-export interface DealSummary { deal: Deal; documents: Record<string, number>; claim_counts: Record<string, number>; findings_by_severity: Record<string, number>; seller_adjusted_ebitda: string | null; verified_adjusted_ebitda: string | null; reported_ebitda: string | null; dscr_by_scenario: Array<{ scenario_id: string; name: string; kind: string; dscr: string | null; warnings: string[] }>; covenant_threshold: string | null; missing_documents: Finding[]; top_findings: Finding[]; latest_report: { id: string; version_no: number; status: string; outcome: string; created_at: string } | null; active_jobs: number; mode: { provider: string; model: string } }
+export interface DealSummary { deal: Deal; documents: Record<string, number>; claim_counts: Record<string, number>; findings_by_severity: Record<string, number>; seller_adjusted_ebitda: string | null; verified_adjusted_ebitda: string | null; reported_ebitda: string | null; dscr_by_scenario: Array<{ scenario_id: string; name: string; kind: string; dscr: string | null; warnings: string[] }>; covenant_threshold: string | null; missing_documents: Finding[]; top_findings: Finding[]; latest_report: { id: string; version_no: number; status: string; outcome: string; created_at: string } | null; active_jobs: number; mode: { provider: string; model: string }; confidence: Record<string, number> }
 export interface Health { status: string; version: string; engine_version: string; provider: string; model: string; database: string; storage: string }
 
 /* ---------- Buyer workflow: questions for the seller, progress, usage (see the routes in apps/api) ---------- */
@@ -175,6 +178,11 @@ export const members = {
   invite: (dealId: string, email: string, role: MemberRole) => api.post<DealMember>(`/api/deals/${dealId}/members`, { email, role }),
   remove: (dealId: string, memberId: string) => api.del(`/api/deals/${dealId}/members/${memberId}`),
   accept: (token: string) => api.post<{ deal_id: string }>("/api/invites/accept", { token }),
+};
+
+export const financials = {
+  corrections: (dealId: string) => api.get<Correction[]>(`/api/deals/${dealId}/financials/corrections`),
+  correct: (dealId: string, body: { line_key: string; period_label: string; value: string; note?: string }) => api.post<Correction>(`/api/deals/${dealId}/financials/corrections`, body),
 };
 
 export const billing = {

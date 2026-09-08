@@ -4,8 +4,8 @@ import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MessageSquareText } from "lucide-react";
-import { api, type Adjustment, type Financials, type Metric, type StatementMapping } from "@/lib/api";
-import { useFinancials, useStatementMapping, qk } from "@/components/app/hooks";
+import { api, financials, type Adjustment, type Correction, type Financials, type Metric, type StatementMapping } from "@/lib/api";
+import { useFinancials, useStatementMapping, useCorrections, useInvalidateDeal, qk } from "@/components/app/hooks";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, Panel, Skeleton } from "@/components/ui/primitives";
@@ -113,6 +113,8 @@ const SCALE_LABEL: Record<number, string> = { 1: "dollars (no scale stated)", 10
 function CheckWhatWeRead({ dealId, onCite }: { dealId: string; onCite: (eid: string) => void }) {
   const q = useStatementMapping(dealId);
   const [showAll, setShowAll] = useState(false);
+  const [correcting, setCorrecting] = useState(false);
+  const [lastImpact, setLastImpact] = useState<Correction | null>(null);
   if (q.isPending) return <Panel title="Check what we read" id="check-read"><Skeleton className="h-24" /></Panel>;
   if (q.isError || !q.data) return null;
   const m: StatementMapping = q.data;
@@ -132,6 +134,13 @@ function CheckWhatWeRead({ dealId, onCite }: { dealId: string; onCite: (eid: str
         <span className="ml-auto text-xs text-accent">details</span>
       </summary>
     <div className="border-t border-hairline p-5">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="secondary" onClick={() => setCorrecting(true)}>Correct a figure…</Button>
+        <span className="text-xs text-fg-muted">Wrong row, wrong scale, stale cell: fix it here. The original stays on record and every dependent number recomputes.</span>
+      </div>
+      <CorrectionsList dealId={dealId} />
+      {correcting && <CorrectionDialog dealId={dealId} mapping={m} onClose={() => setCorrecting(false)} onDone={(c) => { setCorrecting(false); setLastImpact(c); }} />}
+      {lastImpact && <ImpactPanel c={lastImpact} onClose={() => setLastImpact(null)} />}
       <p className="text-sm text-fg-muted">Every figure below was read from a spreadsheet by rules, not by a person. Before relying on it, confirm the years, the scale, and the rows the rules picked. Anything the rules were unsure about is flagged; anything they could not read is listed.</p>
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="flex flex-col gap-4">
@@ -178,6 +187,83 @@ function CheckWhatWeRead({ dealId, onCite }: { dealId: string; onCite: (eid: str
       </div>
     </div>
     </details>
+  );
+}
+
+/** Corrections already recorded on this deal: original → corrected, who, why, and how much moved. */
+function CorrectionsList({ dealId }: { dealId: string }) {
+  const q = useCorrections(dealId);
+  const rows = q.data ?? [];
+  if (rows.length === 0) return null;
+  return (
+    <div className="mb-4 rounded-[var(--radius-2)] border border-hairline p-3 text-sm">
+      <p className="text-xs text-fg-muted">Corrections on record ({rows.length}). The mapper&apos;s value is kept beside each.</p>
+      <ul className="mt-2 space-y-1.5">
+        {rows.map((c) => (
+          <li key={c.id} className="flex flex-wrap items-baseline gap-x-2">
+            <span className="font-medium">{LINE_LABEL.get(c.line_key) ?? c.line_key}</span><span className="text-fg-muted">{c.period_label}</span>
+            <span className="num text-fg-muted line-through">{fmtMoney(c.original_value)}</span><span className="num">{fmtMoney(c.corrected_value)}</span>
+            {c.note && <span className="text-fg-muted">“{c.note}”</span>}
+            <span className="text-xs text-fg-muted">{c.by ?? "reviewer"} · {c.impact.metrics.length} figures, {c.impact.claims_changed.length} claim statuses changed</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** Pick the line and year, type the right value, say why. Submitting re-analyses the deal and returns what changed. */
+function CorrectionDialog({ dealId, mapping, onClose, onDone }: { dealId: string; mapping: StatementMapping; onClose: () => void; onDone: (c: Correction) => void }) {
+  const statement = mapping.statements.find((s) => s.mapped);
+  const lines = statement?.lines ?? [];
+  const periods = statement?.periods ?? [];
+  const [lineKey, setLineKey] = useState(lines[0]?.key ?? "revenue");
+  const [period, setPeriod] = useState(periods[periods.length - 1]?.label ?? "");
+  const [value, setValue] = useState("");
+  const [note, setNote] = useState("");
+  const qc = useQueryClient();
+  const invalidate = useInvalidateDeal(dealId);
+  const { toast } = useToast();
+  const current = lines.find((l) => l.key === lineKey)?.cells[period];
+  const m = useMutation({
+    mutationFn: () => financials.correct(dealId, { line_key: lineKey, period_label: period, value: value.replace(/[,$\s]/g, ""), note: note || undefined }),
+    onSuccess: (c) => { invalidate(); qc.invalidateQueries({ queryKey: qk.corrections(dealId) }); toast({ title: "Figure corrected", description: `${c.impact.metrics.length} figures recomputed.`, tone: "success" }); onDone(c); },
+    onError: (e) => toast({ title: "Could not record the correction", description: String(e), tone: "error" }),
+  });
+  return (
+    <Dialog.Root open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(92vw,480px)] -translate-x-1/2 -translate-y-1/2 rounded-[var(--radius-3)] border border-hairline bg-bg-raised p-5 shadow-lg">
+          <Dialog.Title className="text-lg font-semibold">Correct a figure</Dialog.Title>
+          <Dialog.Description className="mt-1 text-sm text-fg-muted">The statement cell is not edited. Your value is recorded under your name beside the mapper&apos;s, and every number and finding that depends on it is recomputed.</Dialog.Description>
+          <form className="mt-4 flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); if (value.trim()) m.mutate(); }}>
+            <Field label="Line">{(p) => <select id={p.id} className={inputClass(false)} value={lineKey} onChange={(e) => setLineKey(e.target.value)}>{lines.map((l) => <option key={l.key} value={l.key}>{LINE_LABEL.get(l.key) ?? l.key}</option>)}</select>}</Field>
+            <Field label="Year">{(p) => <select id={p.id} className={inputClass(false)} value={period} onChange={(e) => setPeriod(e.target.value)}>{periods.map((y) => <option key={y.label} value={y.label}>{y.label}</option>)}</select>}</Field>
+            {current && <p className="text-xs text-fg-muted">Read from cell {current.cell}: <span className="num">{fmtMoney(current.value)}</span>{current.correction ? <>, corrected to <span className="num">{fmtMoney(current.correction.corrected_value)}</span></> : ""}.</p>}
+            <Field label="Correct value (USD)">{(p) => <input id={p.id} className={inputClass(false)} inputMode="decimal" placeholder="13,500,000" value={value} onChange={(e) => setValue(e.target.value)} required />}</Field>
+            <Field label="Why (shown beside the correction)">{(p) => <input id={p.id} className={inputClass(false)} placeholder="Tax return shows 13.5M; the workbook cell is stale." value={note} onChange={(e) => setNote(e.target.value)} />}</Field>
+            <div className="flex justify-end gap-2"><Dialog.Close asChild><Button type="button" variant="secondary">Cancel</Button></Dialog.Close><Button type="submit" loading={m.isPending}>Record and recompute</Button></div>
+          </form>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+/** What one correction changed: figures with before and after, claims whose status moved, findings added or removed. */
+function ImpactPanel({ c, onClose }: { c: Correction; onClose: () => void }) {
+  const i = c.impact;
+  const shown = i.metrics.filter((x) => !["revenue", "cost_of_goods_sold"].includes(x.key) || x.period === c.period_label).slice(0, 12);
+  return (
+    <div role="status" className="mb-4 rounded-[var(--radius-2)] border border-accent/40 bg-bg-raised p-4 text-sm">
+      <div className="flex items-baseline gap-2"><p className="font-medium">What changed</p><span className="text-xs text-fg-muted">{LINE_LABEL.get(c.line_key) ?? c.line_key} {c.period_label}: <span className="num line-through">{fmtMoney(c.original_value)}</span> → <span className="num">{fmtMoney(c.corrected_value)}</span></span><button type="button" className="ml-auto text-xs text-accent hover:underline" onClick={onClose}>Dismiss</button></div>
+      {shown.length > 0 && <ul className="mt-2 grid gap-x-6 gap-y-1 md:grid-cols-2">{shown.map((x) => <li key={`${x.key}|${x.period}`} className="flex justify-between gap-3"><span className="text-fg-muted">{x.label}{x.period ? ` (${x.period})` : ""}</span><span className="num"><span className="text-fg-muted line-through">{fmtValue(x.before, x.unit)}</span> {fmtValue(x.after, x.unit)}</span></li>)}</ul>}
+      {i.metrics.length > shown.length && <p className="mt-1 text-xs text-fg-muted">and {i.metrics.length - shown.length} more figures.</p>}
+      {i.claims_changed.length > 0 && <ul className="mt-2 space-y-1">{i.claims_changed.map((x) => <li key={x.key}><span className="text-fg-muted">Claim</span> “{x.text}” <StatusChip status={x.before} size="sm" /> → <StatusChip status={x.after} size="sm" /></li>)}</ul>}
+      {(i.findings_added.length + i.findings_removed.length) > 0 && <p className="mt-2 text-fg-muted">{i.findings_added.length} finding{i.findings_added.length === 1 ? "" : "s"} added, {i.findings_removed.length} removed.</p>}
+      {i.metrics.length === 0 && i.claims_changed.length === 0 && <p className="mt-2 text-fg-muted">Nothing depended on that figure.</p>}
+    </div>
   );
 }
 

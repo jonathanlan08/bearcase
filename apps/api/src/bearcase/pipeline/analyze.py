@@ -23,7 +23,7 @@ from bearcase.engine.money import Calc, D
 from bearcase.engine.scenarios import ScenarioInputs, project
 from bearcase.ingest.customers import aggregate_customers
 from bearcase.ingest.parsers.common import ParsedChunk
-from bearcase.ingest.statement_mapper import map_income_statement
+from bearcase.ingest.statement_mapper import map_income_statement, MappedValue, StatementMap
 from bearcase.models import (
     Adjustment,
     Claim,
@@ -186,6 +186,32 @@ def _clear_analysis(db: Session, deal: Deal) -> None:
 # ---------- statements ----------------------------------------------------------------------
 
 
+def apply_corrections(db: Session, deal: Deal, smap: StatementMap) -> dict[tuple[str, str], dict[str, Any]]:
+    """Replace mapped values with the latest person's correction per (period, line). The mapper's value is kept in
+    the returned snapshot fields so the metric row shows both; the correction row itself is never touched."""
+    from bearcase.models import StatementCorrection
+
+    out: dict[tuple[str, str], dict[str, Any]] = {}
+    rows = db.scalars(
+        select(StatementCorrection).where(StatementCorrection.deal_id == deal.id).order_by(StatementCorrection.created_at)
+    ).all()
+    for c in rows:  # later rows win: the list is oldest first
+        if c.period_label not in smap.lines:
+            continue
+        mv = smap.lines[c.period_label].get(c.line_key)
+        if mv is None:
+            continue
+        smap.lines[c.period_label][c.line_key] = MappedValue(c.corrected_value, mv.raw, mv.cell, mv.sheet, mv.row, mv.chunk_index, 1.0)
+        smap.ambiguous.pop(c.line_key, None)
+        out[(c.period_label, c.line_key)] = {
+            "corrected": True,
+            "correction_id": str(c.id),
+            "mapped_value": str(mv.value),
+            "correction_note": c.note,
+        }
+    return out
+
+
 def build_statement_metrics(
     db: Session, deal: Deal, docs: list[Document], ev: dict[uuid.UUID, list[Evidence]]
 ) -> dict[str, FinancialPeriod]:
@@ -197,6 +223,7 @@ def build_statement_metrics(
         smap = map_income_statement(_chunks_from_evidence(rows))
         if smap is None:
             continue
+        corrected = apply_corrections(db, deal, smap)
         for ordinal, label in enumerate(smap.periods):
             period = FinancialPeriod(
                 deal_id=deal.id, label=label, ordinal=ordinal, source_document_id=doc.id, source_sheet=smap.sheet
@@ -228,9 +255,10 @@ def build_statement_metrics(
                         "document_id": str(doc.id),
                         "scale": smap.scale,
                         **({"components": smap.ambiguous[key]} if key in smap.ambiguous else {}),
+                        **corrected.get((label, key), {}),
                     },
                     confidence=mv.confidence,
-                    requires_review=mv.confidence < 0.8,
+                    requires_review=mv.confidence < 0.8 and (label, key) not in corrected,
                     raw_value=mv.raw,
                 )
         # calculated per-period metrics

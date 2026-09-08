@@ -52,3 +52,8 @@ Questions are answered only from persisted rows (claims, metrics, adjustments, s
 `bearcase eval` seeds Northstar into a scratch database and scores: structured-output validity, extraction recall, status accuracy, contradiction precision, citation completeness, citation resolution, unsupported behaviour, review-required behaviour, no invented evidence, prompt-injection resistance, mock determinism, report citation validation, Ask the Deal grounding.
 
 The evaluation runs on the curated Northstar fixtures with the mock provider. Passing it shows the pipeline still produces the expected result on those files; it is a regression check, not a measurement of extraction accuracy on unfamiliar documents or of a live model's behaviour. Measuring those needs an independently labelled set of unfamiliar deals and a real key.
+
+
+## Corrections to mapped figures
+
+A reviewer can correct a figure the mapper read from a statement. The correction is an additive row (`statement_corrections`) holding the original value, the corrected value, the reviewer, a note, and the recorded impact; the extracted metric row and the source cell are never edited. The pipeline applies the latest correction per line and period when it re-analyses the deal, marks the metric `corrected` with the mapper's value beside it, and the audit trail records the change. Undoing a correction is another correction back to the original, so the history stays complete.
