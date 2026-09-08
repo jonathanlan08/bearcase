@@ -360,6 +360,15 @@ class WaterfallStep(BaseModel):
     adjustment_id: uuid.UUID | None = None
 
 
+class ReviewNoteRequest(BaseModel):
+    kind: Literal["conclusion", "assumption", "open_question"] = "conclusion"
+    text: str = Field(min_length=5, max_length=4000)
+    evidence_ids: list[uuid.UUID] = Field(default_factory=list, max_length=20)
+    metric_ids: list[uuid.UUID] = Field(default_factory=list, max_length=20)
+    claim_id: uuid.UUID | None = None
+    finding_id: uuid.UUID | None = None
+
+
 class CustomQuestionRequest(BaseModel):
     question: str = Field(min_length=5, max_length=2000)
     why: str | None = Field(default=None, max_length=2000)

@@ -3,17 +3,16 @@
 import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { useDeal } from "@/components/app/hooks";
+import { NoteDialog } from "@/components/domain/note-dialog";
 import { Dialog } from "radix-ui";
-import { MessageSquareText, Plus, Send, Square, X, Trash2, Maximize2, Minimize2 } from "lucide-react";
+import { MessageSquareText, Plus, Send, Square, X, Trash2, Maximize2, Minimize2, History } from "lucide-react";
 import { api, type ChatBudget } from "@/lib/api";
 import { useLocalString, useModifierKey, useLocalFlag } from "@/lib/hooks";
 import { onChatPrompt, setChatOpen, takeChatPrompt, toggleChat, useChatBus, resetChatBus } from "@/lib/chat-bus";
 import { Button } from "@/components/ui/button";
-import { Kbd } from "@/components/ui/primitives";
 import { StatusGlyph } from "@/components/domain/status";
 import { Markdown, stripCitations, type CitationSources } from "@/components/domain/markdown";
 import { DocumentViewer, type ViewerTarget } from "@/components/domain/document-viewer";
-import { StatementKindsLegend } from "@/components/domain/statement-kinds";
 import { fmtDate, fmtInt } from "@/lib/format";
 
 /** "deal" when the reply used deal tools, resolved a citation, or stated an uncited figure; "general" only for a grounded general-assistant answer. */
@@ -62,7 +61,7 @@ export function isRateLimit(message: string): boolean {
 
 const ACTION = "text-[11px] text-fg-muted underline-offset-2 hover:text-fg hover:underline";
 const CURSOR = <span className="ml-0.5 inline-block h-[1em] w-[2px] animate-pulse bg-fg align-text-bottom" aria-hidden />;
-const CHIP = "rounded-[var(--radius-1)] border border-hairline px-2 py-1 text-left text-[11px] text-fg-muted transition-colors duration-[120ms] hover:bg-bg-muted hover:text-fg";
+const CHIP = "rounded-full border border-hairline px-2.5 py-1 text-left text-[12px] text-fg-muted transition-colors duration-[120ms] hover:bg-bg-muted hover:text-fg";
 
 /** The most recent thread per deal for this browser session, so reopening the panel resumes the conversation. */
 const lastThread = new Map<string, string>();
@@ -82,14 +81,14 @@ export function DealChat({ dealId }: { dealId: string }) {
   return (
     <Dialog.Root open={open} onOpenChange={setChatOpen}>
       <Dialog.Trigger asChild>
-        <button type="button" className="fixed bottom-20 right-4 z-40 inline-flex h-11 items-center gap-2 rounded-[var(--radius-3)] bg-fg px-4 text-sm font-medium text-bg shadow-[var(--shadow-2)] transition-transform duration-150 hover:opacity-90 active:scale-[0.98] md:bottom-5 md:right-5" aria-label={`Ask the deal (${shortcut})`}>
-          <MessageSquareText size={16} /> Ask the deal
+        <button type="button" className="fixed bottom-20 right-4 z-40 inline-flex h-11 items-center gap-2 rounded-[var(--radius-3)] bg-fg px-4 text-sm font-medium text-bg shadow-[var(--shadow-2)] transition-transform duration-150 hover:opacity-90 active:scale-[0.98] md:bottom-5 md:right-5" aria-label={`Chat (${shortcut})`}>
+          <MessageSquareText size={16} /> Chat
         </button>
       </Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-ink-950/30" />
         <Dialog.Content className={`fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-bg-raised shadow-[var(--shadow-2)] outline-none ${expanded ? "max-w-none md:w-[calc(100vw-3.5rem)]" : "max-w-[880px] md:w-[min(80vw,880px)]"}`} aria-describedby="chat-desc">
-          {open && <ChatPanel dealId={dealId} shortcut={shortcut} expanded={!!expanded} onToggleExpand={() => setExpanded(!expanded)} />}
+          {open && <ChatPanel dealId={dealId} expanded={!!expanded} onToggleExpand={() => setExpanded(!expanded)} />}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -111,7 +110,7 @@ function autosize(el: HTMLTextAreaElement | null): void {
   el.style.height = `${Math.min(160, el.scrollHeight)}px`;
 }
 
-function ChatPanel({ dealId, shortcut, expanded, onToggleExpand }: { dealId: string; shortcut: string; expanded: boolean; onToggleExpand: () => void }) {
+function ChatPanel({ dealId, expanded, onToggleExpand }: { dealId: string; expanded: boolean; onToggleExpand: () => void }) {
   const dealQ = useDeal(dealId);
   const dealName = dealQ.data?.company_name;
   const qc = useQueryClient();
@@ -124,7 +123,9 @@ function ChatPanel({ dealId, shortcut, expanded, onToggleExpand }: { dealId: str
   const [focusTick, setFocusTick] = useState(0);
   const [viewer, setViewer] = useState<ViewerTarget | null>(null);
   const [context, setContext] = useState<string | null>(null);
+  const [showThreads, setShowThreads] = useState(false);
   const [saving, setSaving] = useState<Msg | null>(null);
+  const [noting, setNoting] = useState<Msg | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -259,15 +260,10 @@ function ChatPanel({ dealId, shortcut, expanded, onToggleExpand }: { dealId: str
     <>
       <div className="flex h-14 items-center gap-3 border-b border-hairline px-4">
         <div className="min-w-0 flex-1">
-          <Dialog.Title className="text-sm font-semibold">Ask the deal</Dialog.Title>
-          <Dialog.Description id="chat-desc" className="truncate text-[11px] text-fg-muted">
-            {config.data ? (live ? "Answers drawn from the deal room, with citations" : "Offline mode: rule-based answers") : "Loading"}
+          <Dialog.Title className="text-[15px] font-semibold">Chat</Dialog.Title>
+          <Dialog.Description id="chat-desc" className="truncate text-[12px] text-fg-muted">
+            {config.data ? (live ? `About ${dealName ?? "this deal"}` : `About ${dealName ?? "this deal"} · offline, rule-based`) : "Loading"}{context && <> · {context} <button type="button" aria-label="Clear the selected claim" className="text-fg-muted hover:text-fg" onClick={() => setContext(null)}>×</button></>}
           </Dialog.Description>
-          <p className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-fg-muted" aria-label="What the assistant is using">
-            <span className="rounded-[var(--radius-1)] border border-hairline px-1.5">Deal: {dealName ?? "this deal"}</span>
-            {context && <span className="inline-flex items-center gap-1 rounded-[var(--radius-1)] border border-hairline px-1.5">{context}<button type="button" aria-label="Clear the selected claim" className="text-fg-muted hover:text-fg" onClick={() => setContext(null)}>×</button></span>}
-            <span className="rounded-[var(--radius-1)] border border-hairline px-1.5">Documents: all processed</span>
-          </p>
         </div>
         <button type="button" onClick={onToggleExpand} className="hidden rounded-[var(--radius-1)] p-1.5 text-fg-muted hover:bg-bg-muted md:block" aria-pressed={expanded} aria-label={expanded ? "Use the side panel" : "Expand to a workspace"}>{expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
         {pickModel && (
@@ -275,13 +271,13 @@ function ChatPanel({ dealId, shortcut, expanded, onToggleExpand }: { dealId: str
             {models.map((id) => <option key={id} value={id}>{id}</option>)}
           </select>
         )}
-        <button type="button" onClick={newThread} className="rounded-[var(--radius-1)] p-1.5 text-fg-muted hover:bg-bg-muted md:hidden" aria-label="New conversation"><Plus size={16} /></button>
-        <Kbd>{shortcut}</Kbd>
+        <button type="button" onClick={() => setShowThreads((v) => !v)} className="rounded-[var(--radius-1)] p-1.5 text-fg-muted hover:bg-bg-muted" aria-pressed={showThreads || expanded} aria-label="Conversation history"><History size={16} /></button>
+        <button type="button" onClick={newThread} className="rounded-[var(--radius-1)] p-1.5 text-fg-muted hover:bg-bg-muted" aria-label="New conversation"><Plus size={16} /></button>
         <Dialog.Close className="rounded-[var(--radius-1)] p-1.5 text-fg-muted hover:bg-bg-muted" aria-label="Close"><X size={16} /></Dialog.Close>
       </div>
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-44 shrink-0 flex-col border-r border-hairline md:flex">
-          <button type="button" onClick={newThread} className="m-2 inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-2)] border border-hairline px-2 text-xs hover:bg-bg-muted"><Plus size={12} /> New conversation</button>
+        <aside className={`${expanded || showThreads ? "flex" : "hidden"} w-52 shrink-0 flex-col border-r border-hairline`}>
+          <p className="px-3 pt-3 text-[11px] uppercase tracking-wide text-fg-muted">Conversations</p>
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
             {threads.data?.map((t) => (
               <div key={t.id} className={`group flex items-center gap-1 rounded-[var(--radius-1)] ${t.id === threadId ? "bg-bg-muted" : "hover:bg-bg-muted/60"}`}>
@@ -293,15 +289,15 @@ function ChatPanel({ dealId, shortcut, expanded, onToggleExpand }: { dealId: str
           </div>
         </aside>
         <div className="flex min-w-0 flex-1 flex-col">
-          <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+          <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-6">
+            <div className="mx-auto w-full max-w-[720px]">
             {restoring && messages.length === 0 && <p className="text-xs text-fg-muted">Loading your last conversation</p>}
             {!restoring && messages.length === 0 && (
               <div className="flex min-h-full flex-col justify-end gap-4">
                 <div className="text-sm text-fg-muted">
-                  <p className="text-base font-semibold text-fg">Ask anything.</p>
+                  <p className="text-base font-semibold text-fg">Chat about {dealName ?? "this deal"}.</p>
                   {config.data && !live && <p className="mt-2 max-w-[46ch]">{config.data.note}</p>}
-                  <p className="mt-2 max-w-[46ch]">Deal facts come from the claim ledger, verified metrics, add-back decisions, scenario runs, and the documents, each with a citation you can open. A citation shows where a figure came from, not that the whole answer is right, so open the sources before you rely on it. Everything else is answered as a general assistant.</p>
-                  <StatementKindsLegend className="mt-3 max-w-[60ch]" />
+                  <p className="mt-2 max-w-[46ch]">Answers cite the deal room. A citation shows where a figure came from, not that it is right.</p>
                   {budget && <p className="mt-3 text-xs">{budget}.</p>}
                 </div>
                 {config.data && !live && <ConnectModel options={config.data.options} />}
@@ -312,14 +308,16 @@ function ChatPanel({ dealId, shortcut, expanded, onToggleExpand }: { dealId: str
                 )}
               </div>
             )}
-            <ol className="flex flex-col gap-4">
-              {messages.map((m) => <MessageView key={m.id} m={m} onOpen={setViewer} onRegenerate={m.id === lastAssistant?.id ? regenerate : undefined} onSave={m.role === "assistant" && m.content && !m.streaming ? () => setSaving(m) : undefined} />)}
+            <ol className="flex flex-col gap-6">
+              {messages.map((m) => <MessageView key={m.id} m={m} onOpen={setViewer} onRegenerate={m.id === lastAssistant?.id ? regenerate : undefined} onSave={m.role === "assistant" && m.content && !m.streaming ? () => setSaving(m) : undefined} onNote={m.role === "assistant" && m.content && !m.streaming ? () => setNoting(m) : undefined} />)}
             </ol>
+            </div>
           </div>
           <div className="border-t border-hairline p-3">
-            <form className="flex items-end gap-2" onSubmit={(e) => { e.preventDefault(); send(input); }}>
-              <textarea ref={inputRef} aria-label="Message" placeholder="Ask anything" rows={1} className="min-h-[40px] max-h-40 min-w-0 flex-1 resize-none rounded-[var(--radius-2)] border border-hairline bg-bg-raised px-3 py-2 text-sm leading-relaxed" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }} maxLength={4000} />
-              {busy ? <Button type="button" variant="secondary" icon={<Square size={14} />} onClick={() => abortRef.current?.abort()}>Stop</Button> : <Button type="submit" icon={<Send size={14} />} disabled={!input.trim() || restoring}>Send</Button>}
+            <div className="mx-auto w-full max-w-[720px]">
+            <form className="flex items-end gap-2 rounded-2xl border border-hairline bg-bg px-3 py-2 focus-within:border-fg/40" onSubmit={(e) => { e.preventDefault(); send(input); }}>
+              <textarea ref={inputRef} aria-label="Message" placeholder="Message" rows={1} className="min-h-[28px] max-h-40 min-w-0 flex-1 resize-none bg-transparent py-1 text-[15px] outline-none" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }} maxLength={4000} />
+              {busy ? <button type="button" aria-label="Stop" onClick={() => abortRef.current?.abort()} className="grid h-8 w-8 place-items-center rounded-full bg-fg text-bg"><Square size={12} /></button> : <button type="submit" aria-label="Send" disabled={!input.trim() || restoring} className="grid h-8 w-8 place-items-center rounded-full bg-fg text-bg disabled:opacity-30"><Send size={14} /></button>}
             </form>
             {ready && (
               <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Quick prompts">
@@ -328,12 +326,14 @@ function ChatPanel({ dealId, shortcut, expanded, onToggleExpand }: { dealId: str
                 ))}
               </div>
             )}
-            <p className="mt-2 text-[11px] text-fg-muted">Enter to send, Shift+Enter for a new line. Not financial, legal, tax, or investment advice.{budget && <> {budget}.</>}</p>
+            <p className="mt-2 text-[11px] text-fg-muted">Not financial, legal, tax, or investment advice.{budget && <> {budget}.</>}</p>
+            </div>
           </div>
         </div>
       </div>
       <DocumentViewer dealId={dealId} target={viewer} onClose={() => setViewer(null)} />
       {saving && <SaveQuestionDialog dealId={dealId} message={saving} onClose={() => setSaving(null)} />}
+      {noting && <NoteDialog dealId={dealId} draft={stripCitations(noting.content).replace(/[*_`#>]/g, "").slice(0, 1500)} evidenceIds={(noting.citations.evidence ?? []).map((e) => e.id).slice(0, 20)} metricIds={(noting.citations.metrics ?? []).map((x) => x.id).slice(0, 20)} onClose={() => setNoting(null)} />}
     </>
   );
 }
@@ -445,9 +445,9 @@ export function grounding(m: Msg): { status: string; text: string; detail: strin
   return { status: "supported", text: `All ${fmtInt(n)} citations resolve · review the answer`, detail };
 }
 
-export function MessageView({ m, onOpen, onRegenerate, onSave }: { m: Msg; onOpen: (t: ViewerTarget) => void; onRegenerate?: () => void; onSave?: () => void }) {
+export function MessageView({ m, onOpen, onRegenerate, onSave, onNote }: { m: Msg; onOpen: (t: ViewerTarget) => void; onRegenerate?: () => void; onSave?: () => void; onNote?: () => void }) {
   const [copied, setCopied] = useState(false);
-  if (m.role === "user") return <li className="self-end max-w-[85%] rounded-[var(--radius-3)] bg-bg-muted px-3.5 py-2.5 text-sm">{m.content}</li>;
+  if (m.role === "user") return <li className="self-end max-w-[78%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-bg-muted px-4 py-2.5 text-[14px] leading-relaxed">{m.content}</li>;
   const tools = m.tools?.length ? m.tools : m.tool_calls.map((t) => t.label ?? t.name);
   // Every non-streaming row is finished, including one stopped before any text arrived: it still gets its footer and Regenerate.
   const finished = !m.streaming;
@@ -463,7 +463,7 @@ export function MessageView({ m, onOpen, onRegenerate, onSave }: { m: Msg; onOpe
     <li className="max-w-full">
       {tools.length > 0 && <p className="mb-1.5 text-[11px] text-fg-muted">{Array.from(new Set(tools)).join(", ")}</p>}
       {m.notice && <p className="mb-1.5 text-[11px] text-fg-muted">{m.notice}</p>}
-      <div className="text-[15px] leading-relaxed">
+      <div className="max-w-[68ch] text-[15px] leading-7">
         {m.streaming && !m.content
           ? <p role="status" className="text-xs text-fg-muted">{tools.length > 0 ? "Reading the deal room…" : "Thinking…"}{CURSOR}</p>
           : finished && !m.content && !m.error
@@ -487,6 +487,7 @@ export function MessageView({ m, onOpen, onRegenerate, onSave }: { m: Msg; onOpe
           {m.content && <button type="button" onClick={copy} aria-live="polite" className={ACTION}>{copied ? "Copied" : "Copy"}</button>}
           {onRegenerate && <button type="button" onClick={onRegenerate} className={ACTION}>Regenerate</button>}
           {onSave && <button type="button" onClick={onSave} className={ACTION}>Save as seller question</button>}
+          {onNote && <button type="button" onClick={onNote} className={ACTION}>Add to notebook</button>}
         </div>
       )}
     </li>

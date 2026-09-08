@@ -195,6 +195,23 @@ class CustomQuestion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     user: Mapped[User] = relationship(foreign_keys=[user_id])
 
 
+class ReviewNote(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """The reviewer's notebook: a conclusion, an assumption, or an open question, written by a person with the
+    evidence and calculations it rests on. Notes are the first section of the report, so a note that states a
+    figure must cite a source (the route refuses one that does not); removing a note is the author's own action."""
+
+    __tablename__ = "review_notes"
+    deal_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # conclusion | assumption | open_question
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    metric_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    claim_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("claims.id", ondelete="SET NULL"))
+    finding_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("findings.id", ondelete="SET NULL"))
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+
+
 class Purchase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A Stripe Checkout purchase. Created pending when the session is opened; the webhook marks it paid."""
 

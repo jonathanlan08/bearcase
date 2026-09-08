@@ -29,6 +29,7 @@ SEVERITY_HEADINGS = {
     "low": "Low priority",
 }
 KIND_LABELS = {
+    "custom": "Written by the reviewer",
     "contradiction": "Contradiction",
     "unsupported": "Unsupported statement",
     "missing_document": "Missing document",

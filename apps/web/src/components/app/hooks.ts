@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Claim, type ClaimDetail, type Deal, type DealListItem, type DealSummary, type Doc, type Financials, type Finding, type Job, type Report, type Scenario, type ScenarioFacts, type AuditEvent, type Evidence, type StatementMapping, type ReviewQueue, type VersionDiff, financials, sellerReplies } from "@/lib/api";
+import { api, type Claim, type ClaimDetail, type Deal, type DealListItem, type DealSummary, type Doc, type Financials, type Finding, type Job, type Report, type Scenario, type ScenarioFacts, type AuditEvent, type Evidence, type StatementMapping, type ReviewQueue, type VersionDiff, financials, sellerReplies, notes } from "@/lib/api";
 
 export const qk = {
   me: ["me"] as const,
@@ -23,6 +23,7 @@ export const qk = {
   queue: (id: string) => ["queue", id] as const,
   corrections: (id: string) => ["corrections", id] as const,
   replies: (id: string) => ["replies", id] as const,
+  notes: (id: string) => ["notes", id] as const,
   diff: (id: string, did: string) => ["diff", id, did] as const,
   docEvidence: (id: string, did: string) => ["docEvidence", id, did] as const,
 };
@@ -42,6 +43,7 @@ export const useFacts = (id: string) => useQuery({ queryKey: qk.facts(id), query
 export const useReport = (id: string) => useQuery({ queryKey: qk.report(id), queryFn: () => api.get<Report | null>(`/api/deals/${id}/report`) });
 export const useFindings = (id: string) => useQuery({ queryKey: qk.findings(id), queryFn: () => api.get<Finding[]>(`/api/deals/${id}/findings`) });
 export const useAudit = (id: string) => useQuery({ queryKey: qk.audit(id), queryFn: () => api.get<AuditEvent[]>(`/api/deals/${id}/audit`) });
+export const useNotes = (id: string) => useQuery({ queryKey: qk.notes(id), queryFn: () => notes.list(id) });
 export const useSellerReplies = (id: string) => useQuery({ queryKey: qk.replies(id), queryFn: () => sellerReplies.list(id) });
 export const useVersionDiff = (id: string, did: string | null) => useQuery({ queryKey: qk.diff(id, did ?? ""), queryFn: () => api.get<VersionDiff>(`/api/deals/${id}/documents/${did}/diff`), enabled: !!did });
 export const useCorrections = (id: string) => useQuery({ queryKey: qk.corrections(id), queryFn: () => financials.corrections(id) });

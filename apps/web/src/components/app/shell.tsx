@@ -5,7 +5,7 @@ import { CommandPalette } from "@/components/app/command-palette";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useLocalFlag } from "@/lib/hooks";
-import { FolderOpen, ListChecks, Calculator, FlaskConical, FileText, MessageCircleQuestionMark, LayoutDashboard, History, PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, MoreHorizontal, ShieldCheck, Inbox } from "lucide-react";
+import { FolderOpen, ListChecks, Calculator, FlaskConical, FileText, MessageCircleQuestionMark, LayoutDashboard, History, PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, MoreHorizontal, ShieldCheck, Inbox, NotebookPen } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, auth, errorDetail } from "@/lib/api";
@@ -27,6 +27,7 @@ const PRIMARY = [
 const SECONDARY = [
   { key: "", label: "Overview", Icon: LayoutDashboard },
   { key: "inbox", label: "Review queue", Icon: Inbox },
+  { key: "notebook", label: "Notebook", Icon: NotebookPen },
   { key: "audit", label: "Audit history", Icon: History },
 ];
 
@@ -101,7 +102,7 @@ export function DealShell({ children }: { children: React.ReactNode }) {
         </nav>
         <div className="mt-auto flex flex-col gap-2 p-3">
           {!collapsed && chatConfig.data && (
-            <p className="truncate px-1 text-[11px] text-fg-muted">Assistant: {chatConfig.data.live ? chatConfig.data.label : "offline, rule-based"}</p>
+            <p className="truncate px-1 text-[11px] text-fg-muted">Chat: {chatConfig.data.live ? chatConfig.data.label : "offline, rule-based"}</p>
           )}
           {!collapsed && deal.data?.is_demo && <p className="text-[11px] leading-snug text-fg-muted">{(deal.data.company_name ?? "This deal").split(",")[0]} is fictional. Not financial, legal, tax, or investment advice.</p>}
           <Link href="/trust" className="flex h-8 items-center gap-2 rounded-[var(--radius-1)] px-1 text-xs text-fg-muted hover:bg-bg-muted hover:text-fg" title={collapsed ? "Trust & data" : undefined} aria-label={collapsed ? "Trust & data" : undefined}><ShieldCheck size={14} />{!collapsed && "Trust & data"}</Link>

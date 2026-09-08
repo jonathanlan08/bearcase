@@ -46,6 +46,7 @@ from bearcase.reports.validate import validate_sections
 from bearcase.schemas.ai_v1 import SCHEMA_VERSION
 
 SECTION_TITLES = {
+    "reviewer_memo": "Reviewer's memo",
     "deal_overview": "Deal overview",
     "executive_summary": "Executive summary",
     "documents_reviewed": "Documents reviewed",
@@ -70,6 +71,7 @@ SECTION_ORDER = list(SECTION_TITLES)
 # "$" or "%" on purpose: the citation validator treats any figure as material.
 SECTION_INTROS = {
     "deal_overview": "What is being bought and how the purchase is paid for.",
+    "reviewer_memo": "What the reviewer concluded, assumed, and left open, in their own words, with the sources each note rests on. Written by a person; nothing here was generated.",
     "executive_summary": "What stood out when the seller's statements were checked against the primary documents.",
     "documents_reviewed": "The files in the deal room and whether each one was read successfully.",
     "verified_financials": (
@@ -122,7 +124,6 @@ DOC_TYPE_LABELS = {
     "customer_contract": "customer contract",
 }
 FINDING_KIND_LABELS = {
-    "custom": "Written by the reviewer",
     FindingKind.CONTRADICTION: "Contradiction",
     FindingKind.UNSUPPORTED_ASSUMPTION: "Unsupported assumption",
     FindingKind.MISSING_DOCUMENT: "Missing document",
@@ -898,6 +899,18 @@ def assemble_report(db: Session, deal: Deal, provider: AIProvider, user_id: uuid
         table={"columns": ["Reviewer", "Action", "Resulting status", "Note"], "rows": dec_rows},
         kind="table",
     )
+
+    # The reviewer's memo: notes first, because they are the only statements a person wrote.
+    from bearcase.models import ReviewNote
+
+    notes = list(db.scalars(select(ReviewNote).where(ReviewNote.deal_id == deal.id).order_by(ReviewNote.created_at)))
+    if notes:
+        order = {"conclusion": 0, "assumption": 1, "open_question": 2}
+        label = {"conclusion": "Conclusion", "assumption": "Assumption", "open_question": "Open question"}
+        section(
+            "reviewer_memo",
+            [_stmt(f"{label[n.kind]}: {n.text}", [uuid.UUID(e) for e in (n.evidence_ids or [])], [uuid.UUID(m) for m in (n.metric_ids or [])], role="reviewer") for n in sorted(notes, key=lambda n: (order.get(n.kind, 3), n.created_at))],
+        )
 
     # Narrative from the provider
     material = build_material(db, deal, claims, findings, metrics, scenario_runs, ev_index)

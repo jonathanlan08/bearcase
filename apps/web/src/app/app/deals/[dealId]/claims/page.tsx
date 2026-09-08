@@ -2,7 +2,8 @@
 
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Check, X, Pencil, ExternalLink, Undo2, MessageSquareText } from "lucide-react";
+import { ArrowLeft, Check, X, Pencil, ExternalLink, Undo2, MessageSquareText, NotebookPen } from "lucide-react";
+import { NoteDialog } from "@/components/domain/note-dialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { qk, useClaim, useClaims } from "@/components/app/hooks";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
@@ -41,6 +42,7 @@ export default function ClaimsPage() {
   const [q, setQ] = useState("");
   const [chosen, setSelected] = useState<string | null>(search.get("claim"));
   const [viewer, setViewer] = useState<ViewerTarget | null>(null);
+  const [noting, setNoting] = useState(false);
   const [dialog, setDialog] = useState<DialogMode>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const review = useReview(dealId);
@@ -161,6 +163,7 @@ export default function ClaimsPage() {
                 <div className="mt-3 flex flex-wrap gap-2 border-t border-hairline pt-3">
                   <Button size="sm" variant="ghost" icon={<ExternalLink size={14} />} onClick={() => jumpToSource(d)} disabled={!d.source_evidence}>Jump to source</Button>
                   <Button size="sm" variant="ghost" icon={<MessageSquareText size={14} />} onClick={() => askTheDeal(askPrompt(d), { context: `Claim: ${d.claim_text.slice(0, 80)}` })}>Ask about this claim</Button>
+                  <Button size="sm" variant="ghost" icon={<NotebookPen size={14} />} onClick={() => setNoting(true)}>Add to notebook</Button>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2" aria-label="Questions about this claim">
                   {CONTEXT_PROMPTS.map(([label, build]) => <Button key={label} size="sm" variant="secondary" onClick={() => askTheDeal(build(d), { send: true, context: `Claim: ${d.claim_text.slice(0, 80)}` })}>{label}</Button>)}
@@ -178,6 +181,7 @@ export default function ClaimsPage() {
         </div>
       </div>
       <DocumentViewer dealId={dealId} target={viewer} onClose={() => setViewer(null)} />
+      {noting && d && <NoteDialog dealId={dealId} claimId={d.id} evidenceIds={[...(d.source_evidence ? [d.source_evidence.id] : []), ...d.links.map((l) => l.evidence.id)].slice(0, 20)} metricIds={d.verified_metric_id ? [d.verified_metric_id] : []} draft={`${STATUS_LABEL[d.effective_status]}: "${d.claim_text}". `} onClose={() => setNoting(false)} />}
       <CorrectionDialog key={dialog ?? "closed"} open={!!dialog} defaultMode={dialog ?? "correct"} onOpenChange={(o) => { if (!o) setDialog(null); }} claim={d ?? null} pending={review.isPending} onSubmit={(body) => { if (selected) review.mutate({ claimId: selected, body }, { onSuccess: () => setDialog(null) }); }} />
     </div>
   );

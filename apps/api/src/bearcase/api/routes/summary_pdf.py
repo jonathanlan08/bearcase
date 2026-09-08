@@ -21,7 +21,7 @@ from bearcase.api.routes.financials import statement_mapping
 from bearcase.api.routes.questions_seller import latest_replies
 from bearcase.audit import record
 from bearcase.engine.metrics import format_money, format_multiple
-from bearcase.models import StatementCorrection
+from bearcase.models import ReviewNote, StatementCorrection
 
 router = APIRouter(tags=["reports"])
 
@@ -48,8 +48,15 @@ def summary_pdf(deal: DealDep, db: DbDep, user: UserDep) -> Response:
     story: list[Any] = [
         Paragraph(f"{deal.company_name}: one-page review summary", st["title"]),
         Paragraph(f"{deal.industry}. Prepared with BearCase from the seller's documents. A citation shows where a figure came from, not that it is true. Not financial, legal, tax, or investment advice.{' Fictional demonstration deal.' if deal.is_demo else ''}", st["sub"]),
-        Paragraph("Read these first", st["h"]),
     ]
+    notes = db.scalars(select(ReviewNote).where(ReviewNote.deal_id == deal.id).order_by(ReviewNote.created_at)).all()
+    if notes:
+        story.append(Paragraph("The reviewer's memo", st["h"]))
+        lab = {"conclusion": "Conclusion", "assumption": "Assumption", "open_question": "Open question"}
+        for n in sorted(notes, key=lambda n: ({"conclusion": 0, "assumption": 1, "open_question": 2}.get(n.kind, 3), n.created_at))[:8]:
+            story.append(Paragraph(f"<b>{lab.get(n.kind, 'Note')}.</b> {n.text}", st["body"]))
+        story.append(Spacer(1, 4))
+    story.append(Paragraph("Read these first", st["h"]))
     if not s.top_findings:
         story.append(Paragraph("No findings recorded yet.", st["body"]))
     for i, f in enumerate(s.top_findings[:3], 1):

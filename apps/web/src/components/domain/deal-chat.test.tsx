@@ -376,7 +376,7 @@ describe("DealChat panel", () => {
     await waitFor(() => expect(document.activeElement).toBe(input));
     expect((input as HTMLTextAreaElement).selectionStart).toBe("Explain this finding: Owner salary add-back of $180,000".length);
     expect(getChatBusState()).toEqual({ open: true, prompt: null });
-    expect(await screen.findByText("Offline mode: rule-based answers")).toBeInTheDocument();
+    expect(await screen.findByText(/offline, rule-based/)).toBeInTheDocument();
     expect(posts).toHaveLength(0);
   });
 
@@ -396,7 +396,7 @@ describe("DealChat panel", () => {
   it("shows the quick prompts under the input: two send as they are, two prefill; the row hides while a reply streams", async () => {
     const { posts } = stubApi();
     renderChat("deal-quick");
-    fireEvent.click(screen.getByRole("button", { name: /Ask the deal/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Chat/ }));
     const group = await screen.findByRole("group", { name: "Quick prompts" });
     expect(within(group).getAllByRole("button").map((b) => b.textContent)).toEqual(QUICK_PROMPTS.map((p) => p.label));
     expect(QUICK_PROMPTS.map((p) => p.label)).toEqual(["Explain this finding", "What should I ask the seller?", "What is missing?", "What changed after this scenario?"]);
@@ -425,7 +425,7 @@ describe("DealChat panel", () => {
     await screen.findByText("Resumed reply.", {}, { timeout: 5000 });
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), { timeout: 5000 });
-    fireEvent.click(screen.getByRole("button", { name: /Ask the deal/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Chat/ }));
     expect(await screen.findByText("Resumed reply.", {}, { timeout: 5000 })).toBeInTheDocument();
     expect(posts).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
@@ -439,8 +439,8 @@ describe("DealChat panel", () => {
   it("names no provider or model when live and hides the model picker unless the server opts in", async () => {
     stubApi("Answer.", { config: LIVE });
     renderChat("deal-live");
-    fireEvent.click(screen.getByRole("button", { name: /Ask the deal/ }));
-    expect(await screen.findByText("Answers drawn from the deal room, with citations")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Chat/ }));
+    expect(await screen.findByText(/^About /)).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
     expect(screen.queryByText(/gemini|Google Gemini/i)).toBeNull();
     expect(screen.queryByText("Connect a model")).toBeNull();
@@ -449,17 +449,17 @@ describe("DealChat panel", () => {
   it("shows the model picker when the server sets picker with more than one model", async () => {
     stubApi("Answer.", { config: { ...LIVE, picker: true } });
     renderChat("deal-picker");
-    fireEvent.click(screen.getByRole("button", { name: /Ask the deal/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Chat/ }));
     const picker = await screen.findByRole("combobox", { name: "Model" });
     expect(within(picker).getAllByRole("option").map((o) => o.textContent)).toEqual(["gemini-3.8-flash", "gemini-3.7-flash"]);
-    expect(screen.getByText("Answers drawn from the deal room, with citations")).toBeInTheDocument();
+    expect(screen.getByText(/^About /)).toBeInTheDocument();
   });
 
   it("keeps the picker hidden when picker is set but only one model is offered", async () => {
     stubApi("Answer.", { config: { ...LIVE, picker: true, models: ["gemini-3.8-flash"] } });
     renderChat("deal-one-model");
-    fireEvent.click(screen.getByRole("button", { name: /Ask the deal/ }));
-    await screen.findByText("Answers drawn from the deal room, with citations");
+    fireEvent.click(screen.getByRole("button", { name: /^Chat/ }));
+    await screen.findByText(/^About /);
     expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
   });
 
