@@ -19,7 +19,7 @@ export function PilotOffer() {
         One real deal, checked end to end{price ? <>, <span className="num">{price}</span></> : ""}.
       </p>
       <p className="mt-3 max-w-[560px] text-[15px] leading-relaxed text-fg-muted">
-        You upload the seller&apos;s documents for one deal. BearCase runs the checks; a person reads every contradiction, every add-back decision, and every flagged statement mapping before anything is delivered. You receive the seller-questions export and the report within five business days, each stating what was checked and what was not.
+        You upload one deal. BearCase runs the checks, a person reads every contradiction and add-back decision, and you get the questions and the report within five business days.
       </p>
       <div className="mt-5 flex flex-wrap gap-3">
         <Link href="/pilot" className={buttonClass("primary")}>{offer.data?.configured ? "Start a pilot" : "Read the pilot terms"}</Link>
@@ -27,7 +27,7 @@ export function PilotOffer() {
           ? <a href={`mailto:${CONTACT}?subject=${encodeURIComponent("BearCase pilot")}`} className={buttonClass("secondary")}>Talk to a person first</a>
           : <Link href="/pilot" className={buttonClass("secondary")}>What the pilot covers</Link>}
       </div>
-      <p className="mt-4 text-xs text-fg-muted">No customer results are shown here yet, because there are none to show. The first pilots will be reported on this page, including what the checks missed.</p>
+      <p className="mt-4 text-xs text-fg-muted">No customer results yet. The first pilots will be reported here, including what the checks missed.</p>
     </div>
   );
 }

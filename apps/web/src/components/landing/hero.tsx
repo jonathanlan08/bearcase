@@ -130,13 +130,13 @@ export function Hero() {
                 Check the seller&apos;s numbers before you buy the business.
               </motion.h1>
               <motion.p {...enter(0.18)} className="mt-6 max-w-[480px] text-[17px] leading-relaxed text-fg-muted md:text-lg">
-                Upload the seller&apos;s package. BearCase reads the statements, flags the claims the documents contradict, recomputes adjusted EBITDA, and hands you the questions to ask the seller, each with its source.
+                Upload the seller&apos;s package. BearCase finds the claims the documents contradict and hands you the questions to ask, each with its source.
               </motion.p>
               <motion.div {...enter(0.3)} className="mt-8 flex flex-wrap gap-3">
                 <Link href="/demo" className={buttonClass("primary", "md", "h-11 px-5")}>Explore the demo</Link>
                 <Link href="/app" className={buttonClass("secondary", "md", "h-11 px-5")}>Sign in or create an account</Link>
               </motion.div>
-              <motion.p {...enter(0.38)} className="mt-4 text-sm text-fg-muted">Try a fictional deal. No account or API key needed. Or <Link href="/demo?deal=messy" className="underline underline-offset-2 hover:text-fg">the messy one</Link>, where BearCase has to stop and ask.</motion.p>
+              <motion.p {...enter(0.38)} className="mt-4 text-sm text-fg-muted">Fictional deal, no account needed. Or try <Link href="/demo?deal=messy" className="underline underline-offset-2 hover:text-fg">the messy one</Link>.</motion.p>
             </div>
           </div>
           <div ref={barRef} className="order-first flex items-start justify-between gap-4 lg:order-last lg:mt-8 lg:items-end lg:justify-start lg:gap-8">
