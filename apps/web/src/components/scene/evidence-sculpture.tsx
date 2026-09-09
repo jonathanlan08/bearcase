@@ -13,9 +13,9 @@
  *  list in the hero; nothing here is the only place a fact appears. No image assets, no model files. */
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { ContactShadows, Environment, Html, Lightformer, MeshTransmissionMaterial, RoundedBox } from "@react-three/drei";
+import { ContactShadows, Environment, Html, Lightformer, MeshTransmissionMaterial, RoundedBox, useGLTF } from "@react-three/drei";
 import { Bloom, EffectComposer, Vignette } from "@react-three/postprocessing";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { ramp, storyProgress, type SceneStore } from "@/components/scene/storyboard";
 
@@ -290,9 +290,26 @@ function Memo({ state, edges }: { state: SceneState; edges: boolean }) {
   );
 }
 
-/** Low-poly bear, built from flat-shaded primitives: the brand mark on the base's front corner. */
-function Bear({ position }: { position: [number, number, number] }) {
-  const mat = useMemo(() => new THREE.MeshStandardMaterial({ color: "#262B32", roughness: 0.55, metalness: 0.35, flatShading: true }), []);
+/** The bear: a sculpted low-poly model (public/models/bear.glb, 2,600 triangles, 53 KB, built by
+ *  scratch/bear.py from fused distance fields and simplified). While it downloads, and wherever the file cannot load,
+ *  the same silhouette is stood in by flat-shaded primitives so the base is never empty. */
+const BEAR_MATERIAL = new THREE.MeshStandardMaterial({ color: "#262B32", roughness: 0.55, metalness: 0.35, flatShading: true });
+
+function BearModel({ position }: { position: [number, number, number] }) {
+  const { scene } = useGLTF("/models/bear.glb");
+  const model = useMemo(() => {
+    const g = scene.clone(true);
+    g.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (mesh.isMesh) { mesh.material = BEAR_MATERIAL; mesh.castShadow = true; mesh.receiveShadow = true; }
+    });
+    return g;
+  }, [scene]);
+  return <primitive object={model} position={position} scale={0.44} rotation={[0, -0.75, 0]} />;
+}
+
+function BearPrimitives({ position }: { position: [number, number, number] }) {
+  const mat = BEAR_MATERIAL;
   return (
     <group position={position} scale={0.5} rotation={[0, -0.6, 0]}>
       <mesh material={mat} position={[0, 0.62, 0]} scale={[1, 1.25, 0.85]} castShadow><sphereGeometry args={[0.62, 7, 5]} /></mesh>
@@ -302,9 +319,23 @@ function Bear({ position }: { position: [number, number, number] }) {
       <mesh material={mat} position={[0.24, 1.7, 0.02]}><sphereGeometry args={[0.11, 4, 3]} /></mesh>
       <mesh material={mat} position={[-0.34, 0.2, 0.42]} rotation={[0.5, 0, 0]}><cylinderGeometry args={[0.16, 0.2, 0.5, 5]} /></mesh>
       <mesh material={mat} position={[0.34, 0.2, 0.42]} rotation={[0.5, 0, 0]}><cylinderGeometry args={[0.16, 0.2, 0.5, 5]} /></mesh>
-      <mesh material={mat} position={[-0.42, 0.55, 0.18]} rotation={[0.3, 0, 0.35]}><cylinderGeometry args={[0.12, 0.15, 0.6, 5]} /></mesh>
-      <mesh material={mat} position={[0.42, 0.55, 0.18]} rotation={[0.3, 0, -0.35]}><cylinderGeometry args={[0.12, 0.15, 0.6, 5]} /></mesh>
     </group>
+  );
+}
+
+class BearBoundary extends Component<{ fallback: React.ReactNode; children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() { return this.state.failed ? this.props.fallback : this.props.children; }
+}
+
+function Bear({ position }: { position: [number, number, number] }) {
+  return (
+    <BearBoundary fallback={<BearPrimitives position={position} />}>
+      <Suspense fallback={<BearPrimitives position={position} />}>
+        <BearModel position={position} />
+      </Suspense>
+    </BearBoundary>
   );
 }
 
@@ -422,7 +453,7 @@ function Scene({ state, story, tier, post }: { state: SceneState; story: SceneSt
         <Memo state={state} edges={tier > 1} />
         <Link state={state} />
         <SourceLabel state={state} />
-        <Bear position={[2.55, BASE_TOP, 1.55]} />
+        <Bear position={[2.15, BASE_TOP, 1.05]} />
       </group>
       {post && (
         <EffectComposer multisampling={0} enableNormalPass={false}>
@@ -489,3 +520,5 @@ export function EvidenceSculptureScene({ story, mobile, onReady, onFail }: { sto
     </div>
   );
 }
+
+useGLTF.preload("/models/bear.glb");
