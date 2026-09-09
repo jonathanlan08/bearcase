@@ -2,8 +2,9 @@
 
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Check, X, Pencil, ExternalLink, Undo2, MessageSquareText, NotebookPen } from "lucide-react";
+import { ArrowLeft, Check, X, Pencil, ExternalLink, Undo2, MessageSquareText, NotebookPen, MessageCircleQuestionMark } from "lucide-react";
 import { NoteDialog } from "@/components/domain/note-dialog";
+import { QuestionDialog, draftSellerQuestion } from "@/components/domain/question-dialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { qk, useClaim, useClaims } from "@/components/app/hooks";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
@@ -43,6 +44,7 @@ export default function ClaimsPage() {
   const [chosen, setSelected] = useState<string | null>(search.get("claim"));
   const [viewer, setViewer] = useState<ViewerTarget | null>(null);
   const [noting, setNoting] = useState(false);
+  const [asking, setAsking] = useState(false);
   const [dialog, setDialog] = useState<DialogMode>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const review = useReview(dealId);
@@ -164,6 +166,7 @@ export default function ClaimsPage() {
                   <Button size="sm" variant="ghost" icon={<ExternalLink size={14} />} onClick={() => jumpToSource(d)} disabled={!d.source_evidence}>Jump to source</Button>
                   <Button size="sm" variant="ghost" icon={<MessageSquareText size={14} />} onClick={() => askTheDeal(askPrompt(d), { context: `Claim: ${d.claim_text.slice(0, 80)}` })}>Ask about this claim</Button>
                   <Button size="sm" variant="ghost" icon={<NotebookPen size={14} />} onClick={() => setNoting(true)}>Add to notebook</Button>
+                  <Button size="sm" variant="ghost" icon={<MessageCircleQuestionMark size={14} />} onClick={() => setAsking(true)}>Draft seller question</Button>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2" aria-label="Questions about this claim">
                   {CONTEXT_PROMPTS.map(([label, build]) => <Button key={label} size="sm" variant="secondary" onClick={() => askTheDeal(build(d), { send: true, context: `Claim: ${d.claim_text.slice(0, 80)}` })}>{label}</Button>)}
@@ -181,6 +184,7 @@ export default function ClaimsPage() {
         </div>
       </div>
       <DocumentViewer dealId={dealId} target={viewer} onClose={() => setViewer(null)} />
+      {asking && d && <QuestionDialog dealId={dealId} draft={draftSellerQuestion(d.claim_text, [...new Set(d.links.filter((l) => l.role === "contradicting").map((l) => l.evidence.document_name))])} why={d.status_rationale ?? ""} evidenceIds={[...(d.source_evidence ? [d.source_evidence.id] : []), ...d.links.map((l) => l.evidence.id)]} onClose={() => setAsking(false)} />}
       {noting && d && <NoteDialog dealId={dealId} claimId={d.id} evidenceIds={[...(d.source_evidence ? [d.source_evidence.id] : []), ...d.links.map((l) => l.evidence.id)].slice(0, 20)} metricIds={d.verified_metric_id ? [d.verified_metric_id] : []} draft={`${STATUS_LABEL[d.effective_status]}: "${d.claim_text}". `} onClose={() => setNoting(false)} />}
       <CorrectionDialog key={dialog ?? "closed"} open={!!dialog} defaultMode={dialog ?? "correct"} onOpenChange={(o) => { if (!o) setDialog(null); }} claim={d ?? null} pending={review.isPending} onSubmit={(body) => { if (selected) review.mutate({ claimId: selected, body }, { onSuccess: () => setDialog(null) }); }} />
     </div>
@@ -203,8 +207,9 @@ function fmtInput(key: string, v: string | number, unit: string): string {
   if (!Number.isFinite(n)) return String(v);
   if (/year/.test(key)) return `${n} ${n === 1 ? "year" : "years"}`;
   if (/pct|margin|share|rate/.test(key)) return fmtValue(String(v), "pct");
-  if (unit === "pct" || unit === "usd" || unit === "multiple" || unit === "ratio") return fmtValue(String(v), "usd");
-  return fmtValue(String(v), unit as never);
+  if (/count|customers|periods/.test(key)) return String(n);
+  void unit;
+  return fmtValue(String(v), "usd");
 }
 
 /** One sentence that substitutes the inputs into the formula, for the calculations a buyer meets first. */
@@ -230,7 +235,9 @@ function AnswerTrace({ d, onOpen, onSource }: { d: ClaimDetail; onOpen: (eid: st
   const m = d.verified_metric;
   const contradicting = d.links.filter((l) => l.role === "contradicting");
   const supporting = d.links.filter((l) => l.role === "supporting");
-  const inputs = m ? Object.entries(m.input_snapshot).filter(([k, v]) => !["sheet", "cell", "row", "document_id", "scale", "components", "corrected", "correction_id", "mapped_value", "correction_note", "scenario_result_id"].includes(k) && (typeof v === "string" || typeof v === "number")) : [];
+  // Calculated metrics keep their inputs under snapshot.inputs; extracted ones carry cell provenance at the top level.
+  const nested = m && typeof m.input_snapshot.inputs === "object" && m.input_snapshot.inputs !== null ? (m.input_snapshot.inputs as Record<string, unknown>) : null;
+  const inputs = m ? Object.entries(nested ?? m.input_snapshot).filter(([k, v]) => !["sheet", "cell", "row", "document_id", "scale", "components", "corrected", "correction_id", "mapped_value", "correction_note", "scenario_result_id", "key", "value", "unit", "formula", "missing", "notes"].includes(k) && (typeof v === "string" || typeof v === "number")) : [];
   const worked = m ? workedExample(m, inputs as Array<[string, string | number]>) : null;
   const steps: Array<{ label: string; body: React.ReactNode }> = [
     { label: "Source", body: <>{d.source_evidence ? <>The claim is a sentence in <button type="button" className="text-accent hover:underline" onClick={onSource}>{d.document_name}{fmtLocator(d.source_evidence.locator) ? `, ${fmtLocator(d.source_evidence.locator)}` : ""}</button>.</> : "No source location was recorded for this claim."}{d.claimed_value !== null && <> The seller&apos;s figure: <span className="num font-medium">{fmtValue(d.claimed_value, d.claimed_unit)}</span>.</>}</> },

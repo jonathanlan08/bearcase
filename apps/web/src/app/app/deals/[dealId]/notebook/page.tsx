@@ -33,6 +33,7 @@ export default function NotebookPage() {
   const [viewer, setViewer] = useState<ViewerTarget | null>(null);
   const base = `/app/deals/${dealId}`;
   const remove = useMutation({ mutationFn: (id: string) => notesApi.remove(dealId, id), onSuccess: () => { qc.invalidateQueries({ queryKey: qk.notes(dealId) }); toast({ title: "Note removed", tone: "success" }); } });
+  const toggle = useMutation({ mutationFn: ({ id, include }: { id: string; include: boolean }) => notesApi.setIncluded(dealId, id, include), onSuccess: (n) => { qc.invalidateQueries({ queryKey: qk.notes(dealId) }); toast({ title: n.include_in_report ? "Included in the report" : "Kept as a private draft", tone: "success" }); } });
   const total = q.data?.notes.length ?? 0;
   return (
     <div>
@@ -42,7 +43,17 @@ export default function NotebookPage() {
       <div className="flex flex-col gap-4 p-4 md:p-6">
         {q.isPending && <Skeleton className="h-40" />}
         {q.isError && <ErrorState detail={String(q.error)} onRetry={() => q.refetch()} />}
-        {q.data && total === 0 && <EmptyState title="Nothing written yet" body="Open a claim and choose “Add to notebook”, or save a chat answer as a note. The first conclusion you write becomes the first line of the report." action={<Button size="sm" onClick={() => setAdding("conclusion")}>Write the first note</Button>} />}
+        {q.data && total === 0 && (
+          <>
+            <EmptyState title="Nothing written yet" body="Open a claim and choose “Add to notebook”, or save a chat answer as a note. The first conclusion you write becomes the first line of the report." action={<Button size="sm" onClick={() => setAdding("conclusion")}>Write the first note</Button>} />
+            <section aria-label="What a useful note looks like" className="rounded-[var(--radius-3)] border border-dashed border-hairline p-5 text-sm">
+              <p className="micro text-fg-muted">Example, not saved</p>
+              <p className="mt-2 text-[15px] leading-relaxed"><span className="font-medium">Conclusion.</span> Price on the statements’ growth, not the memo’s. Revenue rose from $10.4M to $12.95M over two years, 11.6% a year against the 18% claimed, and the seller has not explained the gap.</p>
+              <p className="mt-1 text-xs text-fg-muted">Sources: Income Statement row 4 · Revenue CAGR calculation · CIM page 3. Linked to the growth claim. Included in the report.</p>
+              <p className="mt-3 text-[15px] leading-relaxed"><span className="font-medium">Open question.</span> Which base year does the memo use, and does “approximately” hide a bookings figure?</p>
+            </section>
+          </>
+        )}
         {q.data && total > 0 && ORDER.map((kind) => {
           const rows = q.data.notes.filter((n) => n.kind === kind);
           return (
@@ -55,7 +66,7 @@ export default function NotebookPage() {
               <p className="px-5 pb-3 text-xs text-fg-muted">{HINT[kind]}</p>
               {rows.length === 0 ? <p className="border-t border-hairline px-5 py-3 text-sm text-fg-muted">None yet.</p> : (
                 <ol className="divide-y divide-hairline border-t border-hairline">
-                  {rows.map((n) => <NoteRow key={n.id} n={n} dealId={dealId} base={base} onOpen={(eid) => setViewer({ documentId: "", evidenceId: eid })} onRemove={() => remove.mutate(n.id)} />)}
+                  {rows.map((n) => <NoteRow key={n.id} n={n} dealId={dealId} base={base} onOpen={(eid) => setViewer({ documentId: "", evidenceId: eid })} onRemove={() => remove.mutate(n.id)} onToggle={() => toggle.mutate({ id: n.id, include: !n.include_in_report })} />)}
                 </ol>
               )}
             </section>
@@ -68,12 +79,13 @@ export default function NotebookPage() {
   );
 }
 
-function NoteRow({ n, dealId, base, onOpen, onRemove }: { n: ReviewNote; dealId: string; base: string; onOpen: (eid: string) => void; onRemove: () => void }) {
+function NoteRow({ n, dealId, base, onOpen, onRemove, onToggle }: { n: ReviewNote; dealId: string; base: string; onOpen: (eid: string) => void; onRemove: () => void; onToggle: () => void }) {
   void dealId;
   return (
-    <li className="px-5 py-3 text-sm">
+    <li className={`px-5 py-3 text-sm ${n.include_in_report ? "" : "bg-bg-muted/40"}`}>
       <p className="text-[15px] leading-relaxed">{n.text}</p>
       <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted">
+        <button type="button" onClick={onToggle} className={`rounded-full border px-2 py-0.5 ${n.include_in_report ? "border-accent/60 text-accent" : "border-hairline"}`} aria-pressed={n.include_in_report}>{n.include_in_report ? "In the report" : "Private draft"}</button>
         <span>{n.by ?? "reviewer"}, {fmtDate(n.created_at)}</span>
         {n.evidence_ids.map((e) => <CitationChip key={e} docType="unknown" locator={null} label={`source ${e.slice(0, 6)}`} onClick={() => onOpen(e)} />)}
         {n.metric_ids.length > 0 && <span>{n.metric_ids.length} calculation{n.metric_ids.length === 1 ? "" : "s"}</span>}

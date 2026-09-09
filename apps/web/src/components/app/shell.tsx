@@ -1,11 +1,12 @@
 "use client";
 
 import { CommandPalette } from "@/components/app/command-palette";
+import { toggleChat } from "@/lib/chat-bus";
 
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useLocalFlag } from "@/lib/hooks";
-import { FolderOpen, ListChecks, Calculator, FlaskConical, FileText, MessageCircleQuestionMark, LayoutDashboard, History, PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, MoreHorizontal, ShieldCheck, Inbox, NotebookPen } from "lucide-react";
+import { FolderOpen, ListChecks, Calculator, FlaskConical, FileText, MessageCircleQuestionMark, LayoutDashboard, History, PanelLeftClose, PanelLeftOpen, LogOut, ChevronDown, MoreHorizontal, ShieldCheck, Inbox, NotebookPen, MessageSquareText } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, auth, errorDetail } from "@/lib/api";
@@ -30,6 +31,10 @@ const SECONDARY = [
   { key: "notebook", label: "Notebook", Icon: NotebookPen },
   { key: "audit", label: "Audit history", Icon: History },
 ];
+/** Sidebar groups: the review work, the documents, the analysis behind it, and the record. Ten destinations read
+ *  as four jobs rather than a list of tools. */
+const GROUPS: Array<[string, string[]]> = [["Review", ["", "inbox", "claims", "notebook", "questions"]], ["Documents", ["documents"]], ["Analysis", ["financials", "scenarios", "report"]], ["Record", ["audit"]]];
+const ALL_NAV = [...PRIMARY, ...SECONDARY];
 
 /*
  * Mobile geometry (below md): the bottom nav is 56px plus the safe-area inset; the floating chat trigger is 44px tall and
@@ -96,9 +101,13 @@ export function DealShell({ children }: { children: React.ReactNode }) {
         </div>
         {!collapsed && <button type="button" onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))} className="mx-2 mt-3 flex h-8 items-center gap-2 rounded-[var(--radius-2)] border border-hairline px-2 text-left text-xs text-fg-muted hover:bg-bg-muted" aria-label="Find anything (Command K)"><span className="flex-1">Find anything</span><kbd className="font-mono text-[10px]">⌘K</kbd></button>}
         <nav className="mt-3 flex flex-col gap-0.5 px-2">
-          {PRIMARY.map((n) => <NavLink key={n.key} href={`${base}/${n.key}`} label={n.label} Icon={n.Icon} active={isActive(n.key)} />)}
-          <div className="my-2 h-px bg-hairline" />
-          {SECONDARY.map((n) => <NavLink key={n.key} href={n.key ? `${base}/${n.key}` : base} label={n.label} Icon={n.Icon} active={isActive(n.key)} />)}
+          {GROUPS.map(([title, keys], gi) => (
+            <div key={title} className={gi > 0 ? "mt-3" : ""}>
+              {!collapsed && <p className="px-2 pb-1 text-[10px] uppercase tracking-wide text-fg-muted">{title}</p>}
+              {collapsed && gi > 0 && <div className="my-2 h-px bg-hairline" />}
+              {keys.map((k) => { const n = ALL_NAV.find((x) => x.key === k); return n ? <NavLink key={k} href={k ? `${base}/${k}` : base} label={n.label} Icon={n.Icon} active={isActive(k)} /> : null; })}
+            </div>
+          ))}
         </nav>
         <div className="mt-auto flex flex-col gap-2 p-3">
           {!collapsed && chatConfig.data && (
@@ -142,7 +151,8 @@ export function DealShell({ children }: { children: React.ReactNode }) {
         {me.data && !me.data.is_demo && !me.data.email_verified && <VerifyBanner email={me.data.email} />}
         <main id="main" className={`flex-1 ${MAIN_PAD}`}>{children}</main>
         <div className={CHAT_TRIGGER_OFFSET}><DealChat dealId={dealId} /></div>
-        <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-6 border-t border-hairline bg-bg-raised pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Primary">
+        <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-7 border-t border-hairline bg-bg-raised pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Primary">
+          <button type="button" onClick={() => toggleChat()} aria-label="Chat" className="flex h-14 flex-col items-center justify-center gap-1 text-[10px] text-fg-muted"><MessageSquareText size={18} /><span className="truncate px-1">Chat</span></button>
           {PRIMARY.map(({ key, label, short, Icon }) => (
             <Link key={key} href={`${base}/${key}`} aria-current={isActive(key) ? "page" : undefined} aria-label={label} className={`flex h-14 flex-col items-center justify-center gap-1 text-[10px] ${isActive(key) ? "text-fg font-medium" : "text-fg-muted"}`}>
               <Icon size={18} /><span className="truncate px-1">{short}</span>

@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bearcase.api.deps import DbDep, DealDep, EditorDealDep, UserDep
-from bearcase.api.schemas import ReviewNoteRequest
+from bearcase.api.schemas import NoteUpdateRequest, ReviewNoteRequest
 from bearcase.audit import record
 from bearcase.models import Claim, Evidence, FinancialMetric, Finding, ReviewNote
 
@@ -32,6 +32,7 @@ def note_out(n: ReviewNote) -> dict[str, Any]:
         "metric_ids": [str(m) for m in (n.metric_ids or [])],
         "claim_id": str(n.claim_id) if n.claim_id else None,
         "finding_id": str(n.finding_id) if n.finding_id else None,
+        "include_in_report": bool(n.include_in_report),
         "by": n.user.display_name if n.user else None,
         "created_at": n.created_at.isoformat(),
     }
@@ -63,10 +64,22 @@ def add_note(deal: EditorDealDep, body: ReviewNoteRequest, db: DbDep, user: User
         raise HTTPException(422, "The claim does not belong to this deal.")
     if body.finding_id and db.scalar(select(Finding.id).where(Finding.id == body.finding_id, Finding.deal_id == deal.id)) is None:
         raise HTTPException(422, "The finding does not belong to this deal.")
-    n = ReviewNote(deal_id=deal.id, user_id=user.id, kind=body.kind, text=body.text.strip(), evidence_ids=[str(e) for e in body.evidence_ids], metric_ids=[str(m) for m in body.metric_ids], claim_id=body.claim_id, finding_id=body.finding_id)
+    n = ReviewNote(deal_id=deal.id, user_id=user.id, kind=body.kind, text=body.text.strip(), evidence_ids=[str(e) for e in body.evidence_ids], metric_ids=[str(m) for m in body.metric_ids], claim_id=body.claim_id, finding_id=body.finding_id, include_in_report=body.include_in_report)
     db.add(n)
     db.flush()
     record(db, deal_id=deal.id, user_id=user.id, event_type="note.added", object_type="review_note", object_id=n.id, summary=f"{KIND_LABEL[n.kind]} recorded: {n.text[:90]}", payload={"kind": n.kind, "evidence": len(n.evidence_ids), "metrics": len(n.metric_ids)})
+    db.commit()
+    return note_out(n)
+
+
+@router.patch("/deals/{deal_id}/notes/{note_id}")
+def update_note(deal: EditorDealDep, note_id: uuid.UUID, body: NoteUpdateRequest, db: DbDep, user: UserDep) -> dict[str, Any]:
+    """Include a draft in the report, or pull a note back to a private draft. The text is never edited in place."""
+    n = db.scalar(select(ReviewNote).where(ReviewNote.id == note_id, ReviewNote.deal_id == deal.id))
+    if n is None:
+        raise HTTPException(404, "Note not found.")
+    n.include_in_report = body.include_in_report
+    record(db, deal_id=deal.id, user_id=user.id, event_type="note.included" if body.include_in_report else "note.drafted", object_type="review_note", object_id=n.id, summary=("Included in the report: " if body.include_in_report else "Kept as a private draft: ") + n.text[:90])
     db.commit()
     return note_out(n)
 

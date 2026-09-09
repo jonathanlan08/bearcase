@@ -498,3 +498,26 @@ def diff_versions(deal: DealDep, document_id: uuid.UUID, db: DbDep, against: int
         out.update({"kind": "text", "chunks_before": len(old_text), "chunks_after": len(new_text), "added": added[:40], "removed": removed[:40]})
     out["stale"] = bool(out.get("changes") or out.get("added") or out.get("removed"))
     return out
+
+
+@router.get("/deals/{deal_id}/evidence-search")
+def search_evidence(deal: DealDep, db: DbDep, q: str = "", limit: int = 20) -> list[dict[str, Any]]:
+    """Find evidence rows by their text, for attaching a source to a note or a question. Case-insensitive
+    substring match over this deal's evidence only; returns the document, the location, and an excerpt."""
+    needle = q.strip()
+    if len(needle) < 2:
+        return []
+    rows = db.scalars(
+        select(Evidence)
+        .where(Evidence.deal_id == deal.id, Evidence.text.ilike(f"%{needle}%"))
+        .order_by(Evidence.document_id, Evidence.chunk_index)
+        .limit(max(1, min(limit, 50)))
+    ).all()
+    out = []
+    for e in rows:
+        text = e.text or ""
+        i = text.lower().find(needle.lower())
+        start = max(0, i - 80)
+        excerpt = ("…" if start > 0 else "") + text[start : start + 240] + ("…" if len(text) > start + 240 else "")
+        out.append({"id": str(e.id), "document_id": str(e.document_id), "document_name": e.document.display_name, "doc_type": e.document.doc_type.value, "kind": e.kind.value, "locator": e.locator, "excerpt": excerpt})
+    return out

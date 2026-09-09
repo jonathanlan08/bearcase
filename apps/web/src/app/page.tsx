@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SiteNav, SiteFooter } from "@/components/landing/chrome";
 import { Hero } from "@/components/landing/hero";
-import { ClaimEvidenceFigure, ContradictionFigure, ReportFigure, ScenarioFigure, WaterfallFigure } from "@/components/landing/figures";
+import { ClaimEvidenceFigure } from "@/components/landing/figures";
 import { PilotOffer } from "@/components/landing/pilot-offer";
 import { buttonClass } from "@/components/ui/button";
 import snapshot from "@/content/northstar-snapshot.json";
@@ -37,13 +37,6 @@ const DEMO = {
 const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
 const word = (n: number) => WORDS[n] ?? String(n);
 
-/** The same four steps the deal overview tracks, in the same words. */
-const FIRST_SESSION: Array<[string, string]> = [
-  ["Add documents", "The memo, the statements, the customer list, the contracts, the loan terms."],
-  ["Check the findings", "Each claim is marked supported, contradicted, or unsupported, with its page or cell beside it."],
-  ["Inspect the evidence", "Open the cited cell and decide for yourself."],
-  ["Send questions to the seller", "Every gap becomes a question with the evidence attached."],
-];
 
 export default function LandingPage() {
   return (
@@ -52,24 +45,7 @@ export default function LandingPage() {
       <main id="main">
         <Hero />
 
-        {/* 0. Plain-language framing and the first session */}
-        <section className="content-auto border-t border-hairline" aria-labelledby="first-session-heading">
-          <div className="mx-auto max-w-[1200px] px-6 py-24 md:py-32 lg:px-10">
-            <div className="max-w-[680px]">
-              <h2 id="first-session-heading" className="text-3xl md:text-4xl">The seller&apos;s story, checked line by line against the paperwork.</h2>
-              <p className="mt-4 text-[17px] leading-relaxed text-fg-muted">Each claim in the seller&apos;s memo is quoted next to the page or cell behind it, the numbers are recomputed by code, and the disagreements are shown to you before you sign.</p>
-            </div>
-            <h3 className="mt-16 text-lg font-semibold">What your first session looks like</h3>
-            <ol className="mt-5 grid gap-x-10 gap-y-8 md:grid-cols-4">
-              {FIRST_SESSION.map(([t, d], i) => (
-                <li key={t} className="border-t border-hairline pt-4">
-                  <p className="text-lg font-semibold"><span className="num mr-2 text-fg-muted" aria-hidden>{i + 1}</span>{t}</p>
-                  <p className="mt-2 text-[15px] leading-relaxed text-fg-muted">{d}</p>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </section>
+
 
         {/* 1. Split: claim and its evidence */}
         <section className="content-auto border-t border-hairline">
@@ -79,86 +55,6 @@ export default function LandingPage() {
               <p className="mt-4 text-[17px] leading-relaxed text-fg-muted">Every claim links to the page, row, or cell it came from. Then the primary source is checked.</p>
             </div>
             <div className="md:col-span-8"><ClaimEvidenceFigure /></div>
-          </div>
-        </section>
-
-        {/* 2. Full width: contradiction */}
-        <section className="content-auto border-t border-hairline">
-          <div className="mx-auto max-w-[1200px] px-6 py-24 md:py-32 lg:px-10">
-            <div className="max-w-[640px]">
-              <h2 className="text-3xl md:text-4xl">Two documents, one disagreement.</h2>
-              <p className="mt-4 text-[17px] leading-relaxed text-fg-muted">Numbers are recomputed by code, not by a model. A claim ends up supported, contradicted, or unsupported, and the rule that decided is always shown.</p>
-            </div>
-            <div className="mt-12"><ContradictionFigure /></div>
-          </div>
-        </section>
-
-        {/* 3. Stacked: waterfall */}
-        <section className="content-auto border-t border-hairline">
-          <div className="mx-auto max-w-[1200px] px-6 py-24 md:py-32 lg:px-10">
-            <div className="max-w-[640px]">
-              <h2 className="text-3xl md:text-4xl">Adjusted EBITDA, adjusted back.</h2>
-              <p className="mt-4 text-[17px] leading-relaxed text-fg-muted">Sellers add back costs they say will not recur. Each add-back is tested against the statements; the ones that fail stay out of the total, and the price multiple follows from the checked figure.</p>
-            </div>
-            <div className="mt-12"><WaterfallFigure /></div>
-          </div>
-        </section>
-
-        {/* 4. Split reversed: scenario */}
-        <section className="content-auto border-t border-hairline">
-          <div className="mx-auto grid max-w-[1200px] gap-10 px-6 py-24 md:grid-cols-12 md:py-32 lg:px-10">
-            <div className="md:col-span-8 md:order-1"><ScenarioFigure /></div>
-            <div className="md:col-span-4 md:order-2">
-              <h2 className="text-3xl md:text-4xl">Find the downside before the lender does.</h2>
-              <p className="mt-4 text-[17px] leading-relaxed text-fg-muted">Lose the largest customer, raise the rate, slow the growth. See whether the cash still covers the loan.</p>
-            </div>
-          </div>
-        </section>
-
-        {/* 5. Report */}
-        <section className="content-auto border-t border-hairline">
-          <div className="mx-auto max-w-[1200px] px-6 py-24 md:py-32 lg:px-10">
-            <div className="max-w-[640px]">
-              <h2 className="text-3xl md:text-4xl">A review the committee can check.</h2>
-              <p className="mt-4 text-[17px] leading-relaxed text-fg-muted">The findings, the checked financials, the add-back decisions, the questions for the seller. Every figure opens its source.</p>
-            </div>
-            <div className="mt-12"><ReportFigure /></div>
-          </div>
-        </section>
-
-        {/* 6. Two-column definition list: who does what */}
-        <section className="content-auto border-t border-hairline">
-          <div className="mx-auto max-w-[1200px] px-6 py-24 md:py-32 lg:px-10">
-            <h2 className="max-w-[640px] text-3xl md:text-4xl">The model reads. The code counts. The reviewer decides.</h2>
-            <dl className="mt-12 grid gap-x-16 gap-y-8 md:grid-cols-2">
-              {[
-                ["The model reads", "It quotes claims and drafts questions. It never produces a financial number."],
-                ["The code counts", "Every figure is computed from the statements with its cell recorded. Missing inputs stay missing."],
-                ["Every claim cites", "A statement without a source fails the report. The AI's original output is never edited; your decisions are added beside it."],
-                ["Documents are data", "Uploads are never executed, and text that reads like an instruction is flagged, not followed."],
-              ].map(([t, d]) => (
-                <div key={t} className="border-t border-hairline pt-4"><dt className="text-lg font-semibold">{t}</dt><dd className="mt-2 text-[15px] leading-relaxed text-fg-muted">{d}</dd></div>
-              ))}
-            </dl>
-            <div className="mt-10 flex flex-wrap gap-3"><Link href="/methodology" className={buttonClass("secondary")}>Read how claims are checked</Link></div>
-          </div>
-        </section>
-
-        {/* 7. Close */}
-        <section className="border-t border-hairline">
-          <div className="mx-auto max-w-[1200px] px-6 py-24 lg:px-10">
-            <div className="max-w-[720px]">
-              <h2 className="text-4xl md:text-5xl">Buying a small business for the first time? See what the checks find.</h2>
-              <p className="mt-4 text-lg text-fg-muted">
-                In the fictional Northstar deal, {word(DEMO.contradicted)} of {word(DEMO.headlineClaims)} headline claims are contradicted by the seller&apos;s own documents, the seller&apos;s <span className="num">{DEMO.sellerEbitda}</span> becomes <span className="num">{DEMO.verifiedEbitda}</span> once the add-backs are tested, and {word(DEMO.belowCovenant)} of {word(DEMO.scenarios)} scenarios fall below the lender&apos;s minimum.
-              </p>
-              <div className="mt-8 flex flex-wrap gap-3">
-                <Link href="/demo" className={buttonClass("primary", "md", "h-11 px-5")}>Explore the demo</Link>
-                <Link href="/app" className={buttonClass("secondary", "md", "h-11 px-5")}>Sign in or create an account</Link>
-              </div>
-              <p className="mt-4 text-sm text-fg-muted">Try a fictional deal. No account or API key needed. <Link href="/trust" className="underline underline-offset-2 hover:text-fg">How we handle your documents</Link>.</p>
-              <p className="mt-8 max-w-[560px] text-sm text-fg-muted">Northstar HVAC is fictional. BearCase is a first-pass check, not a substitute for professional diligence, and does not provide financial, legal, tax, or investment advice.</p>
-            </div>
           </div>
         </section>
 
@@ -187,6 +83,37 @@ export default function LandingPage() {
                 <p className="mt-6 text-xs text-fg-muted">Open the demo to read all {word(DEMO.questions)} and download the file.</p>
                 <p className="mt-3 text-xs text-fg-muted">Northstar is a tidy package. <Link href="/demo?deal=messy" className="text-fg underline underline-offset-2">Try the messy one</Link>, where the years are reversed, the revenue is split across rows, and promised documents never arrived.</p>
               </figure>
+            </div>
+          </div>
+        </section>
+
+        {/* How it works, in three lines */}
+        <section className="content-auto border-t border-hairline">
+          <div className="mx-auto max-w-[1200px] px-6 py-20 md:py-24 lg:px-10">
+            <h2 className="max-w-[640px] text-3xl md:text-4xl">The model reads. The code counts. You decide.</h2>
+            <dl className="mt-8 grid gap-x-16 gap-y-6 md:grid-cols-3">
+              {[["The model reads", "It quotes claims and drafts questions. It never produces a financial number."], ["The code counts", "Every figure is computed from the statements with its cell recorded."], ["You decide", "Every status is provisional until a person records a decision, and the original is never edited."]].map(([t, d]) => (
+                <div key={t} className="border-t border-hairline pt-4"><dt className="text-lg font-semibold">{t}</dt><dd className="mt-2 text-[15px] leading-relaxed text-fg-muted">{d}</dd></div>
+              ))}
+            </dl>
+            <p className="mt-6 text-sm text-fg-muted"><Link href="/methodology" className="underline underline-offset-2 hover:text-fg">How each check works</Link> · <Link href="/trust" className="underline underline-offset-2 hover:text-fg">How your documents are handled</Link></p>
+          </div>
+        </section>
+
+        {/* 7. Close */}
+        <section className="border-t border-hairline">
+          <div className="mx-auto max-w-[1200px] px-6 py-24 lg:px-10">
+            <div className="max-w-[720px]">
+              <h2 className="text-4xl md:text-5xl">See what the checks find.</h2>
+              <p className="mt-4 text-lg text-fg-muted">
+                In the fictional Northstar deal, {word(DEMO.contradicted)} of {word(DEMO.headlineClaims)} headline claims are contradicted by the seller&apos;s own documents, the seller&apos;s <span className="num">{DEMO.sellerEbitda}</span> becomes <span className="num">{DEMO.verifiedEbitda}</span> once the add-backs are tested, and {word(DEMO.belowCovenant)} of {word(DEMO.scenarios)} scenarios fall below the lender&apos;s minimum.
+              </p>
+              <div className="mt-8 flex flex-wrap gap-3">
+                <Link href="/demo" className={buttonClass("primary", "md", "h-11 px-5")}>Explore the demo</Link>
+                <Link href="/app" className={buttonClass("secondary", "md", "h-11 px-5")}>Sign in or create an account</Link>
+              </div>
+              <p className="mt-4 text-sm text-fg-muted">Try a fictional deal. No account or API key needed. <Link href="/trust" className="underline underline-offset-2 hover:text-fg">How we handle your documents</Link>.</p>
+              <p className="mt-8 max-w-[560px] text-sm text-fg-muted">Northstar HVAC is fictional. BearCase is a first-pass check, not a substitute for professional diligence, and does not provide financial, legal, tax, or investment advice.</p>
             </div>
           </div>
         </section>

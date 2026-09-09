@@ -38,3 +38,28 @@ def test_notes_round_trip_and_citation_rule():
     assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF"
     assert c.delete(f"/api/deals/{deal}/notes/{nid}").status_code == 204
     assert c.get(f"/api/deals/{deal}/notes").json()["counts"]["conclusion"] == 0
+
+
+def test_drafts_stay_out_of_the_report_and_search_finds_sources():
+    c, deal = _own_demo()
+    hits = c.get(f"/api/deals/{deal}/evidence-search?q=maintenance agreements").json()
+    assert hits and all(h["id"] and h["document_name"] and "maintenance" in h["excerpt"].lower() for h in hits)
+    assert c.get(f"/api/deals/{deal}/evidence-search?q=a").json() == []
+    r = c.post(f"/api/deals/{deal}/notes", json={"kind": "assumption", "text": "The seller's growth story leans on maintenance agreements.", "evidence_ids": [hits[0]["id"]], "include_in_report": False})
+    assert r.status_code == 201 and r.json()["include_in_report"] is False
+    nid = r.json()["id"]
+    c.post(f"/api/deals/{deal}/report")
+    report = c.get(f"/api/deals/{deal}/report").json()
+    assert report["sections"][0]["key"] != "reviewer_memo", "a draft is private"
+    assert c.patch(f"/api/deals/{deal}/notes/{nid}", json={"include_in_report": True}).json()["include_in_report"] is True
+    c.post(f"/api/deals/{deal}/report")
+    assert c.get(f"/api/deals/{deal}/report").json()["sections"][0]["key"] == "reviewer_memo"
+
+
+def test_emphasised_markers_still_resolve():
+    from bearcase.chat.service import normalize_markers
+
+    assert normalize_markers("see **[E:abcdef12]**") == "see [E:abcdef12]"
+    assert normalize_markers("see __[M:abcdef12]__.") == "see [M:abcdef12]."
+    # a marker inside a code span is a literal and stays one (invariant 9: code regions are verbatim)
+    assert normalize_markers("a marker looks like `[M:abcdef12]`") == "a marker looks like `[M:abcdef12]`"

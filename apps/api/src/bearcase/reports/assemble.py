@@ -903,7 +903,7 @@ def assemble_report(db: Session, deal: Deal, provider: AIProvider, user_id: uuid
     # The reviewer's memo: notes first, because they are the only statements a person wrote.
     from bearcase.models import ReviewNote
 
-    notes = list(db.scalars(select(ReviewNote).where(ReviewNote.deal_id == deal.id).order_by(ReviewNote.created_at)))
+    notes = list(db.scalars(select(ReviewNote).where(ReviewNote.deal_id == deal.id, ReviewNote.include_in_report.is_(True)).order_by(ReviewNote.created_at)))
     if notes:
         order = {"conclusion": 0, "assumption": 1, "open_question": 2}
         label = {"conclusion": "Conclusion", "assumption": "Assumption", "open_question": "Open question"}

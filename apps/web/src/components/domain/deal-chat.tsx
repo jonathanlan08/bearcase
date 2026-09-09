@@ -1,15 +1,15 @@
 "use client";
 
 import { Component, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeal } from "@/components/app/hooks";
 import { NoteDialog } from "@/components/domain/note-dialog";
+import { QuestionDialog, draftSellerQuestion } from "@/components/domain/question-dialog";
 import { Dialog } from "radix-ui";
 import { MessageSquareText, Plus, Send, Square, X, Trash2, Maximize2, Minimize2, History } from "lucide-react";
 import { api, type ChatBudget } from "@/lib/api";
 import { useLocalString, useModifierKey, useLocalFlag } from "@/lib/hooks";
 import { onChatPrompt, setChatOpen, takeChatPrompt, toggleChat, useChatBus, resetChatBus } from "@/lib/chat-bus";
-import { Button } from "@/components/ui/button";
 import { StatusGlyph } from "@/components/domain/status";
 import { Markdown, stripCitations, type CitationSources } from "@/components/domain/markdown";
 import { DocumentViewer, type ViewerTarget } from "@/components/domain/document-viewer";
@@ -81,7 +81,7 @@ export function DealChat({ dealId }: { dealId: string }) {
   return (
     <Dialog.Root open={open} onOpenChange={setChatOpen}>
       <Dialog.Trigger asChild>
-        <button type="button" className="fixed bottom-20 right-4 z-40 inline-flex h-11 items-center gap-2 rounded-[var(--radius-3)] bg-fg px-4 text-sm font-medium text-bg shadow-[var(--shadow-2)] transition-transform duration-150 hover:opacity-90 active:scale-[0.98] md:bottom-5 md:right-5" aria-label={`Chat (${shortcut})`}>
+        <button type="button" className="fixed bottom-20 right-4 z-40 hidden h-11 items-center gap-2 md:inline-flex rounded-[var(--radius-3)] bg-fg px-4 text-sm font-medium text-bg shadow-[var(--shadow-2)] transition-transform duration-150 hover:opacity-90 active:scale-[0.98] md:bottom-5 md:right-5" aria-label={`Chat (${shortcut})`}>
           <MessageSquareText size={16} /> Chat
         </button>
       </Dialog.Trigger>
@@ -332,60 +332,12 @@ function ChatPanel({ dealId, expanded, onToggleExpand }: { dealId: string; expan
         </div>
       </div>
       <DocumentViewer dealId={dealId} target={viewer} onClose={() => setViewer(null)} />
-      {saving && <SaveQuestionDialog dealId={dealId} message={saving} onClose={() => setSaving(null)} />}
+      {saving && <QuestionDialog dealId={dealId} draft={draftSellerQuestion(context?.replace(/^Claim: /, "") ?? null, (saving.citations.evidence ?? []).map((e) => e.document_name))} why={stripCitations(saving.content).replace(/[*_`#>]/g, "").split(/(?<=[.?!])\s+/)[0]?.slice(0, 300) ?? ""} evidenceIds={(saving.citations.evidence ?? []).map((e) => e.id)} sourceMessageId={saving.id} onClose={() => setSaving(null)} />}
       {noting && <NoteDialog dealId={dealId} draft={stripCitations(noting.content).replace(/[*_`#>]/g, "").slice(0, 1500)} evidenceIds={(noting.citations.evidence ?? []).map((e) => e.id).slice(0, 20)} metricIds={(noting.citations.metrics ?? []).map((x) => x.id).slice(0, 20)} onClose={() => setNoting(null)} />}
     </>
   );
 }
 
-/** Turn an answer into a seller question the reader edits before it is saved; nothing is sent anywhere. */
-function SaveQuestionDialog({ dealId, message, onClose }: { dealId: string; message: Msg; onClose: () => void }) {
-  const qc = useQueryClient();
-  const draft = firstQuestion(stripCitations(message.content));
-  const [question, setQuestion] = useState(draft);
-  const [why, setWhy] = useState("Drafted with the assistant; edited by the reviewer.");
-  const [severity, setSeverity] = useState("medium");
-  const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
-  const evidence = (message.citations.evidence ?? []).map((e) => e.id).slice(0, 20);
-  const m = useMutation({
-    mutationFn: () => api.post<{ id: string }>(`/api/deals/${dealId}/seller-questions/custom`, { question: question.trim(), why: why.trim() || undefined, severity, evidence_ids: evidence, source_message_id: /^[0-9a-f-]{36}$/.test(message.id) ? message.id : undefined }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sellerQuestions", dealId] }); setDone(true); },
-    onError: (e) => setError(String(e)),
-  });
-  return (
-    <Dialog.Root open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/40" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-[60] w-[min(92vw,520px)] -translate-x-1/2 -translate-y-1/2 rounded-[var(--radius-3)] border border-hairline bg-bg-raised p-5 shadow-lg" aria-describedby="save-q-desc">
-          <Dialog.Title className="text-lg font-semibold">Save as a question for the seller</Dialog.Title>
-          <Dialog.Description id="save-q-desc" className="mt-1 text-sm text-fg-muted">Edit it first. It joins the Seller Questions list under “Written by the reviewer”, with the {evidence.length} source{evidence.length === 1 ? "" : "s"} this answer cited. Nothing is sent to anyone.</Dialog.Description>
-          {done ? (
-            <div className="mt-4 text-sm"><p>Saved. It is now in Seller Questions.</p><div className="mt-3 flex justify-end"><Button type="button" onClick={onClose}>Back to the conversation</Button></div></div>
-          ) : (
-            <form className="mt-4 flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); if (question.trim().length >= 5) m.mutate(); }}>
-              <label className="text-xs text-fg-muted" htmlFor="save-q-text">Question</label>
-              <textarea id="save-q-text" className="min-h-[96px] rounded-[var(--radius-1)] border border-hairline bg-bg px-2 py-1.5 text-sm" value={question} onChange={(e) => setQuestion(e.target.value)} required />
-              <label className="text-xs text-fg-muted" htmlFor="save-q-why">Why we ask</label>
-              <input id="save-q-why" className="h-9 rounded-[var(--radius-1)] border border-hairline bg-bg px-2 text-sm" value={why} onChange={(e) => setWhy(e.target.value)} />
-              <label className="text-xs text-fg-muted" htmlFor="save-q-sev">Priority</label>
-              <select id="save-q-sev" className="h-9 w-40 rounded-[var(--radius-1)] border border-hairline bg-bg px-2 text-sm" value={severity} onChange={(e) => setSeverity(e.target.value)}>{["critical", "high", "medium", "low"].map((s) => <option key={s} value={s}>{s}</option>)}</select>
-              {error && <p role="alert" className="text-sm text-red">{error}</p>}
-              <div className="flex justify-end gap-2"><Dialog.Close asChild><Button type="button" variant="secondary">Cancel</Button></Dialog.Close><Button type="submit" loading={m.isPending}>Save to Seller Questions</Button></div>
-            </form>
-          )}
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
-}
-
-/** The first question-shaped sentence in an answer, or its first sentence, as the draft. */
-function firstQuestion(text: string): string {
-  const plain = text.replace(/[*_`#>]/g, "").replace(/\s+/g, " ").trim();
-  const sentences = plain.split(/(?<=[.?!])\s+/);
-  return (sentences.find((s) => s.trim().endsWith("?")) ?? sentences[0] ?? plain).trim().slice(0, 1500);
-}
 
 /** Empty-state block when no model is connected: one instruction and the provider options in API order (free tiers first). */
 export function ConnectModel({ options }: { options: ChatOption[] }) {
@@ -472,11 +424,7 @@ export function MessageView({ m, onOpen, onRegenerate, onSave, onNote }: { m: Ms
         {m.streaming && m.content && CURSOR}
       </div>
       {m.stale && <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-amber"><StatusGlyph status="review_required" size={11} />Based on an earlier version of the deal: a figure it cites has since been corrected or its document revised. Regenerate for the current numbers.</p>}
-      {finished && (m.citations.uncited?.length ?? 0) > 0 && (
-        <ul className="mt-2 space-y-1 text-xs text-fg-muted" aria-label="Passages without a citation">
-          {m.citations.uncited!.map((u, i) => <li key={i} className="flex gap-1.5"><StatusGlyph status="review_required" size={11} className="mt-0.5 shrink-0" /><span>Not cited: “{u}”. Treat this figure as unverified, or ask for its source.</span></li>)}
-        </ul>
-      )}
+      {finished && (m.citations.uncited?.length ?? 0) > 0 && <p className="mt-2 text-xs text-fg-muted"><StatusGlyph status="review_required" size={11} className="mr-1 inline align-middle" />{m.citations.uncited!.length === 1 ? "One passage" : `${m.citations.uncited!.length} passages`} marked “not cited” above: treat those figures as unverified, or ask for the source.</p>}
       {m.error && (isRateLimit(m.error)
         ? <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-fg-muted"><StatusGlyph status="review_required" size={11} />{m.error}</p>
         : <p className="mt-2 text-xs text-red">{m.error}</p>)}
@@ -495,8 +443,25 @@ export function MessageView({ m, onOpen, onRegenerate, onSave, onNote }: { m: Ms
 }
 
 /** Assistant text: Markdown with [E:id]/[M:id] markers rendered as citation chips, behind a boundary so one bad reply cannot take the chat down. */
+/** Every paragraph that states a figure and carries no citation gets an inline "not cited" flag, so the doubt sits
+ *  beside the sentence rather than in the footer. Code blocks are left alone. */
+export function flagUncited(text: string): string {
+  const parts = text.split(/(```[\s\S]*?```)/);
+  return parts.map((seg) => {
+    if (seg.startsWith("```")) return seg;
+    return seg.split(/(\n\s*\n)/).map((para) => {
+      if (/^\n\s*\n$/.test(para) || !para.trim()) return para;
+      const body = para.replace(/(?:^|\n)[ \t]{0,3}#.*$/gm, "").replace(/(?:^|\n)[ \t]*\d+[.)][ \t]+/g, "\n");
+      const hasFigure = /\d|\$|%/.test(body.replace(/`[^`]*`/g, ""));
+      const cited = /\[(E|M):[0-9a-fA-F-]{8,36}\]/.test(para);
+      return hasFigure && !cited ? `${para.replace(/\s+$/, "")} [U:0]` : para;
+    }).join("");
+  }).join("");
+}
+
 function RichText(props: { text: string; citations: Citations; onOpen: (t: ViewerTarget) => void }) {
-  return <MessageBody text={props.text}><Markdown {...props} /></MessageBody>;
+  const flagged = (props.citations.uncited?.length ?? 0) > 0 ? flagUncited(props.text) : props.text;
+  return <MessageBody text={props.text}><Markdown {...props} text={flagged} /></MessageBody>;
 }
 
 /** Falls back to the raw text when rendering a reply throws; tries the rich view again once the text changes (streaming). */

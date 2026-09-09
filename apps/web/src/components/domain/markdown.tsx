@@ -36,11 +36,13 @@ type Inline =
   | { t: "em"; c: Inline[] }
   | { t: "link"; href: string; c: Inline[] }
   /** `repeat` is set by `markRepeatedMetrics` on a metric marker whose id already appeared earlier in the same message. */
-  | { t: "cite"; kind: "E" | "M"; id: string; repeat?: boolean };
+  | { t: "cite"; kind: "E" | "M"; id: string; repeat?: boolean }
+  /** A paragraph that states a figure without a citation; the chat adds it so the doubt sits beside the sentence. */
+  | { t: "flag" };
 
 // Alternatives are tried in this order at each position; the leftmost match wins. Emphasis content may not
 // cross its own delimiter, so "**a** b **c**" yields two strong runs rather than one.
-const INLINE = /\[(E|M):([0-9a-f-]{36})\]|`([^`\n]+)`|\*\*(?=\S)((?:(?!\*\*)[^\n])*?\S)\*\*|__(?=\S)((?:(?!__)[^\n])*?\S)__|\*(?=[^\s*])([^*\n]*?[^\s*])\*|_(?=[^\s_])([^_\n]*?[^\s_])_|\[([^[\]\n]+)\]\(([^\s()]*(?:\([^\s()]*\)[^\s()]*)*)\)/g;
+const INLINE = /\[(E|M|U):([0-9a-f-]{1,36})\]|`([^`\n]+)`|\*\*(?=\S)((?:(?!\*\*)[^\n])*?\S)\*\*|__(?=\S)((?:(?!__)[^\n])*?\S)__|\*(?=[^\s*])([^*\n]*?[^\s*])\*|_(?=[^\s_])([^_\n]*?[^\s_])_|\[([^[\]\n]+)\]\(([^\s()]*(?:\([^\s()]*\)[^\s()]*)*)\)/g;
 const WORD = /[A-Za-z0-9]/;
 const SAFE_HREF = /^https?:\/\/\S+$/i;
 const HOSTNAME = /^(?:[a-z0-9-]+\.)+[a-z]{2,}(?::\d{1,5})?(?:[/?#]\S*)?$/i;
@@ -62,7 +64,8 @@ function parseInline(src: string): Inline[] {
     const start = m.index ?? 0;
     const end = start + m[0].length;
     if (start > last) out.push({ t: "text", v: src.slice(last, start) });
-    if (m[1] === "E" || m[1] === "M") out.push({ t: "cite", kind: m[1], id: m[2] });
+    if (m[1] === "U") out.push({ t: "flag" });
+    else if (m[1] === "E" || m[1] === "M") out.push({ t: "cite", kind: m[1], id: m[2] });
     else if (m[3] !== undefined) out.push({ t: "code", v: m[3] });
     else if (m[4] !== undefined) out.push({ t: "strong", c: parseInline(m[4]) });
     else if (m[5] !== undefined || m[7] !== undefined) {
@@ -87,7 +90,7 @@ function parseInline(src: string): Inline[] {
 }
 
 function plain(nodes: Inline[]): string {
-  return nodes.map((n) => (n.t === "text" || n.t === "code" ? n.v : n.t === "cite" ? "" : plain(n.c))).join("");
+  return nodes.map((n) => (n.t === "text" || n.t === "code" ? n.v : n.t === "cite" || n.t === "flag" ? "" : plain(n.c))).join("");
 }
 
 // ---------- Block syntax: paragraphs, headings, lists (one nested level), fenced code, quotes, tables, rules ----------
@@ -331,6 +334,7 @@ function renderInline(nodes: Inline[], ctx: Ctx): ReactNode[] {
       case "em": return <em key={i}>{renderInline(n.c, ctx)}</em>;
       case "link": return <a key={i} href={n.href} title={n.href} target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">{renderInline(n.c, ctx)}</a>;
       case "cite": return <Cite key={i} kind={n.kind} id={n.id} repeat={n.repeat} ctx={ctx} />;
+      case "flag": return <span key={i} className="mx-1 inline-flex h-[18px] items-center gap-1 rounded-full border border-amber/60 px-1.5 align-middle text-[10.5px] text-amber" title="This passage states a figure without a citation. Treat it as unverified, or ask for its source.">not cited</span>;
     }
   });
 }

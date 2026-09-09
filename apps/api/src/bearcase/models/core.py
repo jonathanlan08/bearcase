@@ -209,6 +209,7 @@ class ReviewNote(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     metric_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     claim_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("claims.id", ondelete="SET NULL"))
     finding_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("findings.id", ondelete="SET NULL"))
+    include_in_report: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)  # a draft stays private
     user: Mapped[User] = relationship(foreign_keys=[user_id])
 
 

@@ -367,6 +367,11 @@ class ReviewNoteRequest(BaseModel):
     metric_ids: list[uuid.UUID] = Field(default_factory=list, max_length=20)
     claim_id: uuid.UUID | None = None
     finding_id: uuid.UUID | None = None
+    include_in_report: bool = True
+
+
+class NoteUpdateRequest(BaseModel):
+    include_in_report: bool
 
 
 class CustomQuestionRequest(BaseModel):

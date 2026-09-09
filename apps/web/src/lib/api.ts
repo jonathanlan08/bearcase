@@ -58,6 +58,7 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) }),
   put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(body) }),
+  patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   upload: <T>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form }),
   del: (path: string) => requestHeaders(path, { method: "DELETE" }),
   download,
@@ -191,11 +192,12 @@ export const sellerReplies = {
 export interface VersionDiff { document_id: string; document_name?: string; versions: number[]; comparable: boolean; reason?: string; old_version?: number; new_version?: number; kind?: "statement" | "text"; periods_before?: string[]; periods_after?: string[]; scale_before?: number; scale_after?: number; changes?: { period: string; line_key: string; before: string | null; after: string | null; cell: string | null; dependents: string[] }[]; claims_affected?: { id: string; text: string; status: string; metric_key: string | null }[]; added?: string[]; removed?: string[]; chunks_before?: number; chunks_after?: number; stale?: boolean }
 
 export type NoteKind = "conclusion" | "assumption" | "open_question";
-export interface ReviewNote { id: string; kind: NoteKind; text: string; evidence_ids: string[]; metric_ids: string[]; claim_id: string | null; finding_id: string | null; by: string | null; created_at: string }
+export interface ReviewNote { id: string; kind: NoteKind; text: string; evidence_ids: string[]; metric_ids: string[]; claim_id: string | null; finding_id: string | null; include_in_report: boolean; by: string | null; created_at: string }
 export interface ReviewNotes { notes: ReviewNote[]; counts: Record<NoteKind, number> }
 export const notes = {
   list: (dealId: string) => api.get<ReviewNotes>(`/api/deals/${dealId}/notes`),
-  add: (dealId: string, body: { kind: NoteKind; text: string; evidence_ids?: string[]; metric_ids?: string[]; claim_id?: string | null; finding_id?: string | null }) => api.post<ReviewNote>(`/api/deals/${dealId}/notes`, body),
+  add: (dealId: string, body: { kind: NoteKind; text: string; evidence_ids?: string[]; metric_ids?: string[]; claim_id?: string | null; finding_id?: string | null; include_in_report?: boolean }) => api.post<ReviewNote>(`/api/deals/${dealId}/notes`, body),
+  setIncluded: (dealId: string, id: string, include: boolean) => api.patch<ReviewNote>(`/api/deals/${dealId}/notes/${id}`, { include_in_report: include }),
   remove: (dealId: string, id: string) => api.del(`/api/deals/${dealId}/notes/${id}`),
 };
 

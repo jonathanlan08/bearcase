@@ -49,7 +49,7 @@ def summary_pdf(deal: DealDep, db: DbDep, user: UserDep) -> Response:
         Paragraph(f"{deal.company_name}: one-page review summary", st["title"]),
         Paragraph(f"{deal.industry}. Prepared with BearCase from the seller's documents. A citation shows where a figure came from, not that it is true. Not financial, legal, tax, or investment advice.{' Fictional demonstration deal.' if deal.is_demo else ''}", st["sub"]),
     ]
-    notes = db.scalars(select(ReviewNote).where(ReviewNote.deal_id == deal.id).order_by(ReviewNote.created_at)).all()
+    notes = db.scalars(select(ReviewNote).where(ReviewNote.deal_id == deal.id, ReviewNote.include_in_report.is_(True)).order_by(ReviewNote.created_at)).all()
     if notes:
         story.append(Paragraph("The reviewer's memo", st["h"]))
         lab = {"conclusion": "Conclusion", "assumption": "Assumption", "open_question": "Open question"}
