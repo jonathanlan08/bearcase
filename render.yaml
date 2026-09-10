@@ -1,9 +1,8 @@
 # Render Blueprint for the BearCase API: one Docker web service plus a managed PostgreSQL database.
 #
 # Use: push the repository to GitHub, then Render dashboard -> New -> Blueprint -> pick the repository.
-# Render reads render.yaml from the repository root by default; give it this path (infra/render.yaml) when
-# the dashboard asks, or copy the file to the root. The dashboard then prompts for the one value that is
-# not synced (GEMINI_API_KEY). The web app is deployed separately on Vercel with BEARCASE_API_URL pointing
+# Render reads this file from the repository root. The dashboard then prompts for the one value that is
+# not synced (GROQ_API_KEY). The web app is deployed separately on Vercel with BEARCASE_API_URL pointing
 # at this service; the walk-through is docs/deployment.md.
 #
 # One API instance is assumed. The rate limiter (apps/api/src/bearcase/api/ratelimit.py) keeps its token
@@ -44,11 +43,13 @@ services:
           name: bearcase-db
           property: connectionString # postgres(ql):// URLs are normalised to postgresql+psycopg:// in config.py
       - key: BEARCASE_CHAT_PROVIDER
-        value: gemini
-      - key: GEMINI_API_KEY
-        sync: false # pasted in the dashboard at first deploy; every visitor's chat runs on this one project's quota
+        value: groq # free tier, fast; swap to gemini plus GEMINI_API_KEY if you prefer that key
+      - key: GROQ_API_KEY
+        sync: false # pasted in the dashboard at first deploy; every visitor's chat runs on this one key's quota
       - key: BEARCASE_CORS_ORIGINS
-        value: '["https://your-project.vercel.app"]' # JSON list, the web app's origin, no trailing slash
+        value: '["https://your-project.vercel.app"]' # JSON list, the web app's origin, no trailing slash; set after Vercel
+      - key: BEARCASE_APP_BASE_URL
+        value: https://your-project.vercel.app # origin that emailed links point to; set after Vercel
       - key: BEARCASE_JOB_RUNNER
         value: thread # jobs run on a worker thread inside the API process; no separate worker service
       - key: BEARCASE_AI_PROVIDER

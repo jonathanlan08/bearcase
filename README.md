@@ -160,7 +160,7 @@ make docker-up
 
 ## Deploy
 
-The recommended public setup is Render for the API and PostgreSQL and Vercel for the web app: `infra/render.yaml` is a Render Blueprint (database, Docker API service, generated secret, the Gemini key entered in the dashboard), and the web app needs only `BEARCASE_API_URL` set to the Render URL because Next.js proxies `/api` to it.
+The recommended public setup is Render for the API and PostgreSQL and Vercel for the web app: `render.yaml` is a Render Blueprint (database, Docker API service, generated secret, the Groq key entered in the dashboard), and the web app needs only `BEARCASE_API_URL` set to the Render URL because Next.js proxies `/api` to it.
 Before the first start run `bearcase migrate`, then `bearcase doctor`: it prints a readiness table (database reachable and migrated, storage writable, secret set, which model answers by label, limits and quotas) and exits 1 on a failure; the Blueprint runs both before every start.
 With `BEARCASE_ENV=production` the API refuses the development secret and logs a warning for localhost CORS origins, SQLite, local storage, `auto` chat with no key, or a disabled limiter.
 One API instance is assumed: the rate limiter lives in process memory.

@@ -6,7 +6,7 @@ Three ways to run BearCase, from a laptop to a public URL:
 |---|---|---|
 | Local | SQLite, local files, API and web on one machine (`make dev`) | development, the default |
 | Docker Compose | PostgreSQL, MinIO, API, worker, web in containers (`make docker-up`) | a single host you control |
-| Render + Vercel (recommended for a public URL) | API and PostgreSQL on Render from `infra/render.yaml`; the Next.js app on Vercel, proxying `/api` to Render | a portfolio deployment on free tiers, or a small paid one |
+| Render + Vercel (recommended for a public URL) | API and PostgreSQL on Render from `render.yaml`; the Next.js app on Vercel, proxying `/api` to Render | a portfolio deployment on free tiers, or a small paid one |
 
 Whichever path: run `bearcase migrate`, then `bearcase doctor`, before the first start. The rest of this page is the Render + Vercel walk-through, the Compose path, the environment variable table, what the Gemini free tier means for a deployment, and what a paid product would still need.
 
@@ -45,19 +45,19 @@ In production mode the API also logs each warning at start (`bearcase.config`), 
 
 The browser only ever talks to the Vercel origin. The Next.js app rewrites `/api/*` to `BEARCASE_API_URL` (`apps/web/next.config.ts`), so the session cookie is set on the Vercel origin and CORS never comes into play for normal use; `BEARCASE_CORS_ORIGINS` is set to the Vercel origin anyway so a direct browser call from the app's origin also works. No `vercel.json` is needed for the rewrite.
 
-### 1. Get a Gemini key
+### 1. Get a chat key
 
-Create a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) (free tier, no card). Read [Model providers on a deployment](#model-providers-on-a-deployment) first if the deployment will see anything confidential.
+The Blueprint uses Groq: create a key at [console.groq.com/keys](https://console.groq.com/keys) (free tier, no card). To use Gemini instead, change `BEARCASE_CHAT_PROVIDER` to `gemini` and the key variable to `GEMINI_API_KEY` in `render.yaml` before applying, with a key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey). Read [Model providers on a deployment](#model-providers-on-a-deployment) first if the deployment will see anything confidential.
 
 ### 2. Deploy the API on Render
 
 1. Push the repository to GitHub.
-2. In the Render dashboard choose **New → Blueprint** and select the repository. Render looks for `render.yaml` at the repository root; point it at `infra/render.yaml` when the dashboard asks for the path, or copy the file to the root.
-3. The Blueprint creates a PostgreSQL database (`bearcase-db`) and a Docker web service (`bearcase-api`) built from `infra/api.Dockerfile`. It generates `BEARCASE_SECRET_KEY`, wires `BEARCASE_DATABASE_URL` from the database, and asks you for `GEMINI_API_KEY` (marked `sync: false`, so the value lives only in Render). Paste the key and apply.
+2. In the Render dashboard choose **New → Blueprint** and select the repository. Render reads `render.yaml` from the repository root.
+3. The Blueprint creates a PostgreSQL database (`bearcase-db`) and a Docker web service (`bearcase-api`) built from `infra/api.Dockerfile`. It generates `BEARCASE_SECRET_KEY`, wires `BEARCASE_DATABASE_URL` from the database, and asks you for `GROQ_API_KEY` (marked `sync: false`, so the value lives only in Render). Paste the key and apply.
 4. The service starts with `bearcase migrate && bearcase doctor && bearcase serve --host 0.0.0.0 --port 8000`: migrations first, then the readiness check, and the API only serves when the check has no failure. Its output is in the service's log.
 5. Note the service URL (`https://bearcase-api.onrender.com` or similar) and open `/api/health` on it. Leave `BEARCASE_CORS_ORIGINS` for after step 3 below.
 
-What the Blueprint sets: `BEARCASE_ENV=production`, `BEARCASE_CHAT_PROVIDER=gemini`, `BEARCASE_JOB_RUNNER=thread` (jobs run on a thread inside the API process; no worker service), `BEARCASE_AI_PROVIDER=mock` (extraction stays rule-based), `BEARCASE_TRUST_PROXY_HEADERS=true` (Render's proxy appends the client address to `X-Forwarded-For`; the limiter reads the last hop), and `PORT=8000`.
+What the Blueprint sets: `BEARCASE_ENV=production`, `BEARCASE_CHAT_PROVIDER=groq`, `BEARCASE_JOB_RUNNER=thread` (jobs run on a thread inside the API process; no worker service), `BEARCASE_AI_PROVIDER=mock` (extraction stays rule-based), `BEARCASE_TRUST_PROXY_HEADERS=true` (Render's proxy appends the client address to `X-Forwarded-For`; the limiter reads the last hop), and `PORT=8000`.
 
 Free-tier facts to plan around (check Render's current terms; they change): the free web service spins down after 15 idle minutes and the next request waits about a minute; the free database expires 30 days after creation and holds 1 GB, so a deployment that should outlive a month needs the smallest paid database plan; the filesystem is replaced on every deploy, so with the default local storage a document uploaded before a deploy cannot be reprocessed afterwards (claims, evidence, metrics, and decisions are in PostgreSQL and survive; the demo re-seeds per visitor and is unaffected). The Blueprint has commented blocks for S3-compatible storage (`BEARCASE_STORAGE_BACKEND=s3`; the image already contains boto3) and for a persistent disk on paid instance types.
 
