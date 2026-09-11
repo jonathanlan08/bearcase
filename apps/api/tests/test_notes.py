@@ -63,3 +63,7 @@ def test_emphasised_markers_still_resolve():
     assert normalize_markers("see __[M:abcdef12]__.") == "see [M:abcdef12]."
     # a marker inside a code span is a literal and stays one (invariant 9: code regions are verbatim)
     assert normalize_markers("a marker looks like `[M:abcdef12]`") == "a marker looks like `[M:abcdef12]`"
+    # zero-width characters inside the brackets (seen live from gpt-oss-120b): stripped so the marker resolves
+    assert normalize_markers("CAGR 11.6% [\u200bM:d1bd9f2f][\u200bM:65e664a3]") == "CAGR 11.6% [M:d1bd9f2f][M:65e664a3]"
+    assert normalize_markers("see [ E:abcdef12 ]") == "see [E:abcdef12]"
+    assert normalize_markers("plain text with [brackets] stays") == "plain text with [brackets] stays"

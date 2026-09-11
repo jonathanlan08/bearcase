@@ -205,12 +205,17 @@ _GROUPED_CITE = re.compile(r"\[(E|M):([0-9a-fA-F-]{8,36}(?:\s*,\s*[0-9a-fA-F-]{8
 
 
 _WRAPPED_CITE = re.compile(r"[*_]+(\[(?:E|M):[0-9a-fA-F-]{8,36}\])[*_]+")  # bold or underscore around a marker; code spans stay literal
+_ZW = "\u200b\u200c\u200d\u2060\ufeff"  # zero-width characters some models emit inside a marker (seen from gpt-oss-120b on Groq)
+_ZW_CITE = re.compile(rf"\[[{_ZW} ]*([EeMm])[{_ZW} ]*:[{_ZW} ]*([0-9a-fA-F-]{{8,36}}(?:\s*,\s*[0-9a-fA-F-]{{8,36}})*)[{_ZW} ]*\]")
 
 
 def normalize_markers(text: str) -> str:
-    text = _WRAPPED_CITE.sub(r"\1", text)
-    """Accept the marker forms models actually write: fullwidth brackets, and several ids in one marker."""
+    """Accept the marker forms models actually write: fullwidth brackets, zero-width characters or spaces inside
+    the brackets, bold or underscores around a marker, and several ids in one marker. Only the marker itself is
+    rewritten; code spans and the rest of the text are left as they are."""
     text = text.replace("\u3010", "[").replace("\u3011", "]")
+    text = _ZW_CITE.sub(lambda m: f"[{m.group(1).upper()}:{m.group(2)}]", text)
+    text = _WRAPPED_CITE.sub(r"\1", text)
     return _GROUPED_CITE.sub(lambda m: "".join(f"[{m.group(1)}:{i.strip()}]" for i in m.group(2).split(",")), text)
 
 
