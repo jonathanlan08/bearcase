@@ -54,7 +54,7 @@ The Blueprint uses Groq: create a key at [console.groq.com/keys](https://console
 1. Push the repository to GitHub.
 2. In the Render dashboard choose **New → Blueprint** and select the repository. Render reads `render.yaml` from the repository root.
 3. The Blueprint creates a PostgreSQL database (`bearcase-db`) and a Docker web service (`bearcase-api`) built from `infra/api.Dockerfile`. It generates `BEARCASE_SECRET_KEY`, wires `BEARCASE_DATABASE_URL` from the database, and asks you for `GROQ_API_KEY` (marked `sync: false`, so the value lives only in Render). Paste the key and apply.
-4. The service starts with `bearcase migrate && bearcase doctor && bearcase serve --host 0.0.0.0 --port 8000`: migrations first, then the readiness check, and the API only serves when the check has no failure. Its output is in the service's log.
+4. The service starts with `bearcase start --host 0.0.0.0 --port 8000`, which is migrate, then doctor, then serve in one process (Render passes the command as plain arguments, not through a shell, so `&&` chains do not work there): migrations first, then the readiness check, and the API only serves when the check has no failure. Its output is in the service's log.
 5. Note the service URL (`https://bearcase-api.onrender.com` or similar) and open `/api/health` on it. Leave `BEARCASE_CORS_ORIGINS` for after step 3 below.
 
 What the Blueprint sets: `BEARCASE_ENV=production`, `BEARCASE_CHAT_PROVIDER=groq`, `BEARCASE_JOB_RUNNER=thread` (jobs run on a thread inside the API process; no worker service), `BEARCASE_AI_PROVIDER=mock` (extraction stays rule-based), `BEARCASE_TRUST_PROXY_HEADERS=true` (Render's proxy appends the client address to `X-Forwarded-For`; the limiter reads the last hop), and `PORT=8000`.
@@ -98,7 +98,7 @@ Locally, Stripe's CLI (`stripe listen --forward-to localhost:8000/api/billing/we
 
 ### Updating
 
-Push to `main`: Render rebuilds the image and runs migrate → doctor → serve; Vercel rebuilds the web app. A migration that fails, or a doctor failure, keeps the previous Render deploy serving.
+Push to `main`: Render rebuilds the image and runs `bearcase start` (migrate → doctor → serve); Vercel rebuilds the web app. A migration that fails, or a doctor failure, keeps the previous Render deploy serving.
 
 ## Docker Compose
 

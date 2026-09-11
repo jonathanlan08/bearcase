@@ -374,6 +374,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
+def cmd_start(args: argparse.Namespace) -> int:
+    """migrate, then doctor, then serve, in one process. For hosts whose start command is not run through a shell
+    (Render passes the Docker command as plain arguments, so `a && b` reaches the first program as arguments)."""
+    cmd_migrate(args)
+    if cmd_doctor(argparse.Namespace(json=False)) != 0:
+        return 1
+    return cmd_serve(args)
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(prog="bearcase", description="BearCase AI API tooling")
@@ -387,6 +396,11 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--port", type=int, default=8000)
     s.add_argument("--reload", action="store_true")
     s.set_defaults(fn=cmd_serve)
+    st = sub.add_parser("start", help="migrate, then doctor, then serve (one command for hosts without a shell start command)")
+    st.add_argument("--host", default="127.0.0.1")
+    st.add_argument("--port", type=int, default=8000)
+    st.add_argument("--reload", action="store_true")
+    st.set_defaults(fn=cmd_start)
     sub.add_parser("seed", help="Seed the fictional Northstar demo deal").set_defaults(fn=cmd_seed)
     w = sub.add_parser("worker", help="Poll and run queued jobs (for BEARCASE_JOB_RUNNER=poll)")
     w.add_argument("--interval", type=float, default=1.0)
