@@ -121,7 +121,9 @@ export function Hero() {
         <div className={`absolute inset-0 transition-opacity duration-700 ${showScene ? "pointer-events-none opacity-0" : "opacity-100"}`} aria-hidden={showScene}>
           <EvidenceSculptureStatic align={wide ? "right" : "center"} />
         </div>
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(7,8,10,0.6)_0%,rgba(7,8,10,0)_22%,rgba(7,8,10,0)_44%,rgba(7,8,10,0.72)_62%,rgba(7,8,10,0.96)_82%)] lg:bg-[linear-gradient(90deg,rgba(7,8,10,0.94)_0%,rgba(7,8,10,0.8)_34%,rgba(7,8,10,0.06)_56%,transparent)]" aria-hidden />
+        {/* The scrim: on phones the headline starts about 38% down the viewport, over the lower half of the sculpture, so the
+            gradient is nearly opaque by 46%; on wide screens the copy sits left and the scrim runs left to right. */}
+        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(7,8,10,0.6)_0%,rgba(7,8,10,0)_20%,rgba(7,8,10,0.1)_32%,rgba(7,8,10,0.8)_46%,rgba(7,8,10,0.97)_66%)] lg:bg-[linear-gradient(90deg,rgba(7,8,10,0.94)_0%,rgba(7,8,10,0.8)_34%,rgba(7,8,10,0.06)_56%,transparent)]" aria-hidden />
         {/* Copy layer. `pointer-events-none` so parallax, drag, and node hover reach the canvas; the text and controls opt back in. */}
         <div className="pointer-events-none relative mx-auto flex h-full max-w-[1200px] flex-col px-6 pb-8 pt-20 lg:px-10 lg:pb-10 lg:pt-24">
           <div className="flex flex-1 flex-col justify-end lg:justify-center">
