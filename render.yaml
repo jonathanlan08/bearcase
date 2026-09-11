@@ -29,7 +29,7 @@ services:
     dockerContext: .
     # Production mode does not migrate on start (apps/api/src/bearcase/api/app.py), so migrate first, then let
     # `bearcase doctor` refuse to serve when a check fails (database, storage, the secret, a missing extraction key).
-    dockerCommand: sh -c "bearcase migrate && bearcase doctor && bearcase serve --host 0.0.0.0 --port 8000"
+    dockerCommand: bearcase migrate && bearcase doctor && bearcase serve --host 0.0.0.0 --port 8000
     healthCheckPath: /api/health
     envVars:
       - key: PORT
