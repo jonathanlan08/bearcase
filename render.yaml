@@ -48,9 +48,9 @@ services:
       - key: GROQ_API_KEY
         sync: false # pasted in the dashboard at first deploy; every visitor's chat runs on this one key's quota
       - key: BEARCASE_CORS_ORIGINS
-        value: '["https://your-project.vercel.app"]' # JSON list, the web app's origin, no trailing slash; set after Vercel
+        value: '["https://bearcase.vercel.app"]' # JSON list, the web app's origin, no trailing slash; set after Vercel
       - key: BEARCASE_APP_BASE_URL
-        value: https://your-project.vercel.app # origin that emailed links point to; set after Vercel
+        value: https://bearcase.vercel.app # origin that emailed links point to; set after Vercel
       - key: BEARCASE_JOB_RUNNER
         value: thread # jobs run on a worker thread inside the API process; no separate worker service
       - key: BEARCASE_AI_PROVIDER
