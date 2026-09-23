@@ -11,13 +11,8 @@
 #
 # Names and ports match infra/docker-compose.yml and infra/api.Dockerfile (database "bearcase", API on 8000).
 
-databases:
-  - name: bearcase-db
-    plan: free # free databases expire 30 days after creation and hold 1 GB; pick basic-256mb for anything that must last
-    region: oregon
-    databaseName: bearcase
-    user: bearcase
-    postgresMajorVersion: "16"
+# The database is a Neon free-tier Postgres (no expiry, 0.5 GB), not a Render database: Render's free Postgres is
+# deleted 30 days after creation. Its URL is entered in the dashboard as BEARCASE_DATABASE_URL.
 
 services:
   - type: web
@@ -40,9 +35,7 @@ services:
       - key: BEARCASE_SECRET_KEY
         generateValue: true # a random value per environment; never committed
       - key: BEARCASE_DATABASE_URL
-        fromDatabase:
-          name: bearcase-db
-          property: connectionString # postgres(ql):// URLs are normalised to postgresql+psycopg:// in config.py
+        sync: false # a Neon free-tier Postgres URL pasted in the dashboard (Render's free database expires after 30 days); postgres(ql):// URLs are normalised to postgresql+psycopg:// in config.py
       - key: BEARCASE_CHAT_PROVIDER
         value: groq # free tier, fast; swap to gemini plus GEMINI_API_KEY if you prefer that key
       - key: GROQ_API_KEY
