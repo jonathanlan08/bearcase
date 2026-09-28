@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -34,6 +35,7 @@ from bearcase.api.routes import (
 )
 from bearcase.chat.providers import effective_backend
 from bearcase.config import get_settings
+from bearcase.demo_pool import refill_demo_pool
 
 log = logging.getLogger("bearcase")
 API_ROOT = Path(__file__).resolve().parents[3]
@@ -66,6 +68,9 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
         chat_backend.model,
         f"{settings.rate_limit_per_minute}/min" if settings.rate_limit_enabled else "off",
     )
+    if settings.demo_pool_size > 0 and settings.env != "test":
+        # Build the spare demo in the background so the first visitor after a restart does not wait for a seed.
+        threading.Thread(target=refill_demo_pool, name="demo-pool", daemon=True).start()
     yield
 
 

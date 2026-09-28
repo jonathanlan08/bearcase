@@ -128,6 +128,14 @@ class Settings(BaseSettings):
         description="A visitor's demo identity, its deals, and its files are deleted this many days after the visitor's "
         "newest session expired. Cleanup runs lazily, a few users at a time, when a demo starts.",
     )
+    demo_pool_size: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        description="Northstar demo identities kept built ahead of time. A new visitor is handed a spare at once and "
+        "a replacement is built in the background, so nobody waits for the seed (seconds on a small host). 0 turns "
+        "the pool off and every visitor gets a deal seeded on the request.",
+    )
     fixtures_dir: Path = REPO_ROOT / "fixtures" / "northstar-hvac"
 
     # Transactional email (verification, password reset, deal invitations). "console" logs each message and

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, Request, Response, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -13,8 +13,16 @@ from bearcase.api.deps import DbDep, UserDep, token_from_request
 from bearcase.api.ratelimit import rate_limited
 from bearcase.api.routes.auth import set_cookie
 from bearcase.api.schemas import DealOut
-from bearcase.auth import create_demo_visitor, create_session, delete_deal_with_files, purge_stale_demo_users, resolve_session
+from bearcase.auth import (
+    claim_spare_demo,
+    create_demo_visitor,
+    create_session,
+    delete_deal_with_files,
+    purge_stale_demo_users,
+    resolve_session,
+)
 from bearcase.config import get_settings
+from bearcase.demo_pool import refill_demo_pool
 from bearcase.models import Deal
 from bearcase.seed import seed_messy, seed_northstar
 
@@ -35,7 +43,7 @@ def _latest_demo_deal(db: Session, owner_id: uuid.UUID, which: str = "northstar"
 
 
 @router.post("/session", response_model=DealOut, dependencies=[Depends(rate_limited)])
-def start_demo(db: DbDep, request: Request, response: Response, deal: str = "northstar") -> Deal:
+def start_demo(db: DbDep, request: Request, response: Response, background: BackgroundTasks, deal: str = "northstar") -> Deal:
     """Open the caller's own demo.
 
     A caller with a live session, whether a returning demo visitor or a signed-in account, keeps that identity
@@ -53,17 +61,21 @@ def start_demo(db: DbDep, request: Request, response: Response, deal: str = "nor
     except Exception:  # cleanup must never stop a demo from starting
         db.rollback()
         log.exception("demo cleanup failed")
+    if deal not in DEMO_DEALS:
+        raise HTTPException(400, "Unknown demo deal. Choose northstar or messy.")
     user = resolve_session(db, token_from_request(request))
     token: str | None = None
     if user is None:
-        user = create_demo_visitor(db)
+        # A new visitor takes a spare identity whose Northstar deal is already built (see demo_pool.py), else a
+        # fresh identity whose deal is seeded below on the request.
+        user = (claim_spare_demo(db) if deal == "northstar" and settings.demo_pool_size > 0 else None) or create_demo_visitor(db)
         token = create_session(db, user)
-    if deal not in DEMO_DEALS:
-        raise HTTPException(400, "Unknown demo deal. Choose northstar or messy.")
     found = _latest_demo_deal(db, user.id, deal) or DEMO_DEALS[deal][1](db, user)
     db.commit()
     if token:
         set_cookie(response, token)
+    if settings.demo_pool_size > 0:
+        background.add_task(refill_demo_pool)
     return found
 
 

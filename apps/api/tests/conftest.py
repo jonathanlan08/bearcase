@@ -21,6 +21,7 @@ os.environ["STRIPE_SECRET_KEY"] = ""
 os.environ["STRIPE_WEBHOOK_SECRET"] = ""
 os.environ["RESEND_API_KEY"] = ""  # a key in the repo-root .env must never make tests call a provider
 os.environ["BEARCASE_SECRET_KEY"] = "test-secret"
+os.environ["BEARCASE_DEMO_POOL_SIZE"] = "0"  # tests seed on the request unless a test turns the pool on
 
 from fastapi.testclient import TestClient  # noqa: E402
 

@@ -99,6 +99,44 @@ def create_demo_visitor(db: Session) -> User:
     return user
 
 
+SPARE_PREFIX = "spare-"
+
+
+def create_spare_demo_identity(db: Session) -> User:
+    """A demo identity built ahead of any visitor. It has no session until claim_spare_demo hands it out, and its
+    address starts with `spare-` so it is never mistaken for a visitor. An unclaimed spare ages from its creation
+    in purge_stale_demo_users like any sessionless demo identity."""
+    spare_id = uuid.uuid4()
+    user = User(id=spare_id, email=f"{SPARE_PREFIX}{spare_id.hex}@{DEMO_VISITOR_DOMAIN}", display_name="Demo analyst", is_demo=True)
+    db.add(user)
+    db.flush()
+    return user
+
+
+def spare_demo_count(db: Session) -> int:
+    return db.scalar(
+        select(func.count()).select_from(User).where(User.is_demo.is_(True), User.email.startswith(SPARE_PREFIX))
+    ) or 0
+
+
+def claim_spare_demo(db: Session) -> User | None:
+    """Turn the oldest spare into this visitor's identity, or return None when the pool is empty. The row is
+    locked (skipped by concurrent claims on PostgreSQL) and renamed in the caller's transaction, so two visitors
+    can never receive the same spare."""
+    user = db.scalar(
+        select(User)
+        .where(User.is_demo.is_(True), User.email.startswith(SPARE_PREFIX))
+        .order_by(User.created_at)
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    )
+    if user is None:
+        return None
+    user.email = f"visitor-{user.id.hex}@{DEMO_VISITOR_DOMAIN}"
+    db.flush()
+    return user
+
+
 def purge_stale_demo_users(db: Session, *, retention_days: int, limit: int = 20) -> int:
     """Delete demo identities whose newest session expired more than `retention_days` ago, together with their
     deals (database cascades) and stored files. A demo identity that never had a session ages from its creation.

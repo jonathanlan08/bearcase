@@ -91,3 +91,10 @@ Phase 7 partition: `api/routes/demo.py` + `auth.py` (isolation), `ingest/validat
 - Web: **https://bearcase.me** (Namecheap, free for a year through the GitHub Student Pack, registered 2026-09-22; renew or move by 2027-09-22). DNS: one A record `@ → 216.198.79.1` (Vercel), `www` CNAME to the apex. Vercel has the domain on the `bearcase` project; `NEXT_PUBLIC_SITE_URL` is now `https://bearcase.me`. `bearcase.vercel.app` still works.
 - Database: Neon free-tier Postgres, project `bearcase`, AWS us-west-2 (Oregon), direct connection (pooling off). URL entered in Render as `BEARCASE_DATABASE_URL` (`sync: false` in `render.yaml`); migrations ran on it on 2026-09-23. The Render free database `bearcase-db` is no longer used and can be deleted; it would have expired around 2026-10-10.
 - Render: `BEARCASE_CORS_ORIGINS` and `BEARCASE_APP_BASE_URL` are `https://bearcase.me`.
+
+## 2026-09-28: faster demo start on the free hosts
+
+- Cause measured on bearcase.me: the landing page is ready in about half a second, but opening the demo took 5 to 6.5 s even with the API awake (the Northstar seed issues ~600 statements, each a network round trip from Render to Neon, on a tenth of a CPU; the same seed takes 0.25 s locally), plus up to about a minute when Render had spun the free service down.
+- Spare demo pool (`bearcase/demo_pool.py`, setting `BEARCASE_DEMO_POOL_SIZE`, default 1, 0 in tests): a finished Northstar identity is kept ready (`spare-` address, no session). A new visitor to `/api/demo/session` claims it (`claim_spare_demo`, row locked with SKIP LOCKED) and a background task builds the replacement; the API also fills the pool at startup. Tests in `tests/test_demo_pool.py`.
+- `GET /api/ping`: liveness without a database query, so an external ping wakes Render without keeping Neon awake.
+- `.github/workflows/keep-warm.yml` pings it every 10 minutes (about 744 of Render's 750 free hours a month). GitHub pauses scheduled workflows after 60 days of repository inactivity.

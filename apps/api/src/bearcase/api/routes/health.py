@@ -11,6 +11,13 @@ from bearcase.config import get_settings
 router = APIRouter(tags=["health"])
 
 
+@router.get("/ping")
+def ping() -> dict[str, str]:
+    """Liveness without touching the database, for an external keep-awake ping: it wakes a sleeping free-tier web
+    service without keeping a scale-to-zero database awake too (/health runs a query)."""
+    return {"status": "ok"}
+
+
 @router.get("/health", response_model=HealthOut)
 def health(db: DbDep) -> HealthOut:
     s = get_settings()
