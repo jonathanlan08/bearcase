@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from bearcase import __version__
+from bearcase.ai.provider import configured_extraction
 from bearcase.api.routes import (
     audit,
     auth,
@@ -58,13 +59,13 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
         run_migrations()
     chat_backend = effective_backend(settings)  # label and model id only; never a key
     log.info(
-        "BearCase API %s starting (env=%s, db=%s, storage=%s, jobs=%s, extraction=%s, chat=%s/%s, rate_limit=%s)",
+        "BearCase API %s starting (env=%s, db=%s, storage=%s, jobs=%s, extraction=%s/%s, chat=%s/%s, rate_limit=%s)",
         __version__,
         settings.env,
         "sqlite" if settings.is_sqlite else "postgresql",
         settings.storage_backend,
         settings.job_runner,
-        settings.ai_provider,
+        *configured_extraction(settings),  # provider name and model id only; never a key
         chat_backend.label,
         chat_backend.model,
         f"{settings.rate_limit_per_minute}/min" if settings.rate_limit_enabled else "off",

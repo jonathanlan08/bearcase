@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from bearcase import ENGINE_VERSION
-from bearcase.ai.provider import AIProvider
+from bearcase.ai.provider import AIProvider, fallback_note, result_origin
 from bearcase.engine.metrics import format_money, format_multiple, format_pct, format_plain, format_value
 from bearcase.models import (
     Adjustment,
@@ -970,8 +970,8 @@ def assemble_report(db: Session, deal: Deal, provider: AIProvider, user_id: uuid
         outcome=outcome,
         sections=sections,
         validation=validation,
-        provider=provider.name,
-        model=provider.model,
+        provider=result_origin(provider, narrative)[0],
+        model=result_origin(provider, narrative)[1],
         prompt_version=narrative.prompt_version or "n/a",
         schema_version=SCHEMA_VERSION,
         engine_version=ENGINE_VERSION,
@@ -981,6 +981,7 @@ def assemble_report(db: Session, deal: Deal, provider: AIProvider, user_id: uuid
             "scenario_result_ids": [str(r.id) for r in scenario_runs.values()],
             "metric_ids": sorted(metric_ids),
             "narrative_input_hash": narrative.input_hash,
+            **({"narrative_fallback_from": fallback_note(narrative)} if narrative.fallback_from else {}),
         },
         generated_by_user_id=user_id,
     )

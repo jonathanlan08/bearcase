@@ -49,3 +49,13 @@ Do not recommend buying or rejecting the deal. Sections to draft, with keys: exe
 <document>
 {material}
 </document>"""
+
+# OpenAI-compatible providers (ai/openai_compat_provider.py) have no schema-bound parse call, so the system
+# prompt carries the JSON Schema and the reply is validated against the same pydantic model in code. The task
+# templates above are reused unchanged; this suffix is versioned on its own (recorded as "1.0/json-1").
+JSON_OUTPUT_VERSION = "json-1"
+
+JSON_OUTPUT = """
+6. Reply with exactly one JSON object and nothing else: no prose, no Markdown, no code fences. It must validate against this JSON Schema:
+{schema}
+7. Numbers you return are what the documents state, copied as written; BearCase checks them against its own calculations. Never compute, sum, or estimate a figure."""

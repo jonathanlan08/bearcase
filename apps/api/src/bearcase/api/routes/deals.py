@@ -11,6 +11,7 @@ from bearcase.api.schemas import DealCreate, DealListItem, DealOut, DealSummary,
 from bearcase.reports.resolution import resolution_for
 from bearcase.audit import record
 from bearcase.auth import delete_deal_with_files
+from bearcase.ai.provider import configured_extraction
 from bearcase.config import get_settings
 from bearcase.models import (
     Claim,
@@ -172,7 +173,7 @@ def deal_summary(deal: DealDep, db: DbDep) -> DealSummary:
         if report
         else None,
         active_jobs=active,
-        mode={"provider": s.ai_provider, "model": s.ai_model if s.ai_provider == "anthropic" else "rules-v1"},
+        mode={"provider": configured_extraction(s)[0], "model": configured_extraction(s)[1]},
     )
 
 

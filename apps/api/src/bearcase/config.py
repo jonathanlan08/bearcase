@@ -35,11 +35,41 @@ class Settings(BaseSettings):
     s3_endpoint_url: str | None = None
     s3_region: str | None = None
 
-    ai_provider: Literal["mock", "anthropic"] = "mock"
-    ai_model: str = "claude-opus-5"
+    # Extraction, verification, Q&A, and report drafting. "mock" is the rule-based provider tuned to the
+    # Northstar fixtures; "anthropic" uses ai_model; "groq" and "openai_compat" call an OpenAI-compatible
+    # endpoint in JSON mode (ai/openai_compat_provider.py) and fall back to the rule-based provider per call
+    # when the live call fails (ai_fallback_to_mock). Model numbers are claims to verify, never results.
+    ai_provider: Literal["mock", "anthropic", "groq", "openai_compat"] = "mock"
+    ai_model: str = Field(default="claude-opus-5", description="Model id for ai_provider=anthropic.")
     ai_timeout_seconds: float = 60.0
-    ai_max_retries: int = 2
+    ai_max_retries: int = Field(default=2, ge=0, le=5, description="Retries after a 429, 5xx, timeout, or connection error.")
     ai_max_output_tokens: int = 4096
+    ai_extraction_model: str | None = Field(
+        default=None,
+        description="Model id for ai_provider=groq (default openai/gpt-oss-120b) or openai_compat (required).",
+    )
+    ai_base_url: str | None = Field(
+        default=None,
+        description="OpenAI-compatible base URL for ai_provider=openai_compat (or a proxy in front of Groq).",
+    )
+    ai_api_key: str | None = Field(
+        default=None,
+        description="API key for ai_provider=openai_compat. Another provider's key is never sent to this host.",
+    )
+    ai_request_chars: int = Field(
+        default=12000,
+        ge=2000,
+        le=60000,
+        description="Characters of document text or deal material per request for groq/openai_compat. Longer documents "
+        "are split into several extraction requests, up to the 60,000-character budget render_chunks applies. Sized for "
+        "Groq's free tier (about 8K tokens a minute per model); raise it for a paid endpoint.",
+    )
+    ai_fallback_to_mock: bool = Field(
+        default=True,
+        description="When a groq/openai_compat call fails or returns invalid JSON, answer that call with the rule-based "
+        "provider and record both runs. Off: the failure is recorded; a failed verification sends the claim to review "
+        "and a failed extraction yields no claims for that document.",
+    )
 
     # Deal chat. "auto" picks the first provider with a key (anthropic, openai, gemini, groq, openrouter,
     # ollama when OLLAMA_HOST is set) and otherwise the deterministic rule-based composer ("mock").
@@ -210,6 +240,21 @@ def has_chat_credentials(settings: Settings) -> bool:
     return any(keys) or bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
 
 
+def extraction_credentials_problem(settings: Settings) -> str | None:
+    """Why the configured live extraction provider cannot be called, or None (also None for mock). Settings logic
+    only: no provider is contacted and no key is returned."""
+    if settings.ai_provider == "anthropic":
+        if settings.anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+            return None
+        return "no ANTHROPIC_API_KEY"
+    if settings.ai_provider in ("groq", "openai_compat"):
+        from bearcase.ai.openai_compat_provider import resolve_extraction_backend
+
+        backend = resolve_extraction_backend(settings)
+        return None if backend.ready else backend.reason
+    return None
+
+
 def production_warnings(settings: Settings) -> list[str]:
     """Settings a production deployment should look at twice. The production validator logs them at start and
     `bearcase doctor` reports them; none of them stops the API, because each can be a deliberate choice."""
@@ -234,6 +279,16 @@ def production_warnings(settings: Settings) -> list[str]:
         warnings.append(
             "BEARCASE_CHAT_PROVIDER=auto found no provider key, so the chat answers from the rule-based composer; "
             "add a key (GEMINI_API_KEY for the free tier) or set BEARCASE_CHAT_PROVIDER=mock to make that deliberate"
+        )
+    extraction_problem = extraction_credentials_problem(settings)
+    if extraction_problem:
+        warnings.append(
+            f"BEARCASE_AI_PROVIDER={settings.ai_provider} is not ready ({extraction_problem}); "
+            + (
+                "every extraction call falls back to the rule-based provider"
+                if settings.ai_fallback_to_mock and settings.ai_provider != "anthropic"
+                else "document processing will fail"
+            )
         )
     if not settings.rate_limit_enabled:
         warnings.append("BEARCASE_RATE_LIMIT_ENABLED is off: upload, processing, and model-calling routes are unmetered")

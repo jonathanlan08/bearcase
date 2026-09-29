@@ -13,9 +13,10 @@ from bearcase.ingest.classify import classify
 from bearcase.ingest.injection import contains_instruction_text
 from bearcase.ingest.parsers import ParseResult, parse_csv, parse_pdf, parse_xlsx
 from bearcase.ingest.storage import get_storage
-from bearcase.models import Document, DocumentVersion, Evidence, ExtractionRun, ProcessingJob
-from bearcase.models.enums import ClassificationSource, DocumentStatus, DocumentType, EvidenceKind, RunStatus, RunType
+from bearcase.models import Document, DocumentVersion, Evidence, ProcessingJob
+from bearcase.models.enums import ClassificationSource, DocumentStatus, DocumentType, EvidenceKind, RunType
 from bearcase.pipeline.jobs import JobLog
+from bearcase.pipeline.runs import record_run
 
 
 def parse_bytes(extension: str, data: bytes) -> ParseResult:
@@ -57,22 +58,7 @@ def process_document(db: Session, job: ProcessingJob, jl: JobLog) -> None:
                 [ChunkRef(i, c.kind, c.locator, c.text) for i, c in enumerate(parsed.chunks[:80])],
             )
             res = provider.classify(ctx)
-            db.add(
-                ExtractionRun(
-                    deal_id=doc.deal_id,
-                    document_id=doc.id,
-                    run_type=RunType.CLASSIFY,
-                    status=RunStatus.SUCCEEDED if res.ok else RunStatus.FAILED,
-                    provider=provider.name,
-                    model=provider.model,
-                    prompt_version=res.prompt_version,
-                    schema_version=res.schema_version,
-                    input_hash=res.input_hash,
-                    raw_output=res.raw,
-                    usage=res.usage,
-                    error=res.error,
-                )
-            )
+            record_run(db, deal_id=doc.deal_id, document_id=doc.id, run_type=RunType.CLASSIFY, provider=provider, res=res)
             if res.ok and res.output:
                 doc.doc_type = DocumentType(res.output.doc_type)
                 doc.classification_source = ClassificationSource.AI

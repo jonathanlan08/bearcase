@@ -59,6 +59,12 @@ class ProviderResult(Generic[T]):
     schema_version: str = SCHEMA_VERSION
     error: str | None = None
     input_hash: str = ""
+    provider: str = ""
+    """Provider that produced this result, when it differs from the configured one or is worth stating (a
+    hybrid provider answers some calls with the rule-based fallback). Empty: the configured provider."""
+    model: str = ""
+    fallback_from: ProviderResult[Any] | None = None
+    """The failed live result this one replaced. Recorded as its own run (see pipeline/runs.py)."""
 
     @property
     def ok(self) -> bool:
@@ -85,7 +91,37 @@ def get_provider(name: str | None = None) -> AIProvider:
         return AnthropicProvider(model=settings.ai_model, api_key=settings.anthropic_api_key)
     from bearcase.ai.mock import MockProvider
 
+    if chosen in ("groq", "openai_compat"):
+        from bearcase.ai.openai_compat_provider import FallbackProvider, OpenAICompatProvider, resolve_extraction_backend
+
+        live = OpenAICompatProvider(resolve_extraction_backend(settings, chosen), settings)
+        return FallbackProvider(live, MockProvider()) if settings.ai_fallback_to_mock else live
     return MockProvider()
+
+
+def result_origin(provider: AIProvider, res: ProviderResult[Any]) -> tuple[str, str]:
+    """(provider, model) that actually produced a result: the result's own stamp, else the provider's."""
+    return (res.provider or provider.name, res.model or provider.model)
+
+
+def fallback_note(res: ProviderResult[Any]) -> dict[str, Any] | None:
+    """What a fallback result replaced, for audit payloads: provider, model, and the (redacted) reason."""
+    failed = res.fallback_from
+    if failed is None:
+        return None
+    return {"provider": failed.provider, "model": failed.model, "reason": failed.error}
+
+
+def configured_extraction(settings: Any = None) -> tuple[str, str]:
+    """(provider, model) the settings select for extraction, by name and model id only; no key, no network."""
+    s = settings or get_settings()
+    if s.ai_provider == "anthropic":
+        return ("anthropic", s.ai_model)
+    if s.ai_provider in ("groq", "openai_compat"):
+        from bearcase.ai.openai_compat_provider import resolve_extraction_backend
+
+        return (s.ai_provider, resolve_extraction_backend(s).model)
+    return ("mock", "rules-v1")
 
 
 def render_chunks(chunks: list[ChunkRef], max_chars: int = 60000) -> str:
