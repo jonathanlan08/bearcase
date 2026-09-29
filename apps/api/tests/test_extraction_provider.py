@@ -515,7 +515,7 @@ def test_ask_records_the_provider_that_answered(client, demo, db, monkeypatch) -
     live, _ = provider(
         lambda n, kw: (_ for _ in ()).throw(openai.InternalServerError("down", response=_response(503), body=None))
     )
-    monkeypatch.setattr("bearcase.api.routes.questions.get_provider", lambda: FallbackProvider(live, MockProvider()))
+    monkeypatch.setattr("bearcase.api.routes.questions.provider_for_deal", lambda deal: FallbackProvider(live, MockProvider()))
     r = client.post(f"/api/deals/{demo['id']}/ask", json={"question": "What is the verified EBITDA?"})
     assert r.status_code == 201, r.text
     q = db.get(DealQuestion, uuid.UUID(r.json()["id"]))
@@ -537,3 +537,14 @@ def test_a_dropped_scale_word_is_restored_from_the_quoted_sentence() -> None:
     assert restore_stated_scale(Decimal("850"), "usd", "Rent of $850K a year") == Decimal("850000")
     assert restore_stated_scale(Decimal("18"), "pct", "grew 18% since 2022") == Decimal("18")  # not money
     assert restore_stated_scale(Decimal("7.5"), "usd", "revenue of $12.95 million") == Decimal("7.5")  # no match
+
+
+def test_demo_deals_always_use_the_rule_based_reader(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """A demo must not change between visitors or spend the operator's quota, whatever BEARCASE_AI_PROVIDER says."""
+    from types import SimpleNamespace
+
+    from bearcase.ai import provider as prov
+
+    monkeypatch.setattr(prov, "get_provider", lambda name=None: SimpleNamespace(name=name or "groq"))
+    assert prov.provider_for_deal(SimpleNamespace(is_demo=True)).name == "mock"
+    assert prov.provider_for_deal(SimpleNamespace(is_demo=False)).name == "groq"

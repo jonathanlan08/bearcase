@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from bearcase.ai.provider import fallback_note, get_provider, result_origin
+from bearcase.ai.provider import fallback_note, provider_for_deal, result_origin
 from bearcase.api.deps import DbDep, DealDep, UserDep
 from bearcase.api.schemas import Out
 from bearcase.audit import record
@@ -76,7 +76,7 @@ def history(deal: DealDep, db: DbDep, limit: int = Query(default=20, le=100)) ->
 def ask(deal: DealDep, body: AskRequest, db: DbDep, user: UserDep) -> QuestionOut:
     """Citation-first Q&A. Material comes only from persisted rows; the provider drafts; code validates.
     Uncited material statements are removed and the answer is marked not fully grounded."""
-    provider = get_provider()
+    provider = provider_for_deal(deal)
     material = build_material(db, deal, body.question)
     res = provider.answer_question(body.question, material)
     ev_ids, me_ids = evidence_and_metric_ids(db, deal.id)

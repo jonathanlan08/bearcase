@@ -7,13 +7,13 @@ from decimal import Decimal
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from bearcase.ai.provider import ChunkRef, DocumentContext, get_provider
+from bearcase.ai.provider import ChunkRef, DocumentContext, provider_for_deal
 from bearcase.config import get_settings
 from bearcase.ingest.classify import classify
 from bearcase.ingest.injection import contains_instruction_text
 from bearcase.ingest.parsers import ParseResult, parse_csv, parse_pdf, parse_xlsx
 from bearcase.ingest.storage import get_storage
-from bearcase.models import Document, DocumentVersion, Evidence, ProcessingJob
+from bearcase.models import Deal, Document, DocumentVersion, Evidence, ProcessingJob
 from bearcase.models.enums import ClassificationSource, DocumentStatus, DocumentType, EvidenceKind, RunType
 from bearcase.pipeline.jobs import JobLog
 from bearcase.pipeline.runs import record_run
@@ -50,7 +50,7 @@ def process_document(db: Session, job: ProcessingJob, jl: JobLog) -> None:
         doc.classification_source = ClassificationSource.RULE
         doc.classification_confidence = Decimal(str(cls.confidence))
         if cls.doc_type == "unknown":
-            provider = get_provider()
+            provider = provider_for_deal(db.get(Deal, doc.deal_id))
             ctx = DocumentContext(
                 doc.display_name,
                 "unknown",

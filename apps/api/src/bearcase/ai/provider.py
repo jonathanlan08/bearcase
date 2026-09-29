@@ -82,6 +82,13 @@ class AIProvider(Protocol):
     def answer_question(self, question: str, material: dict[str, Any]) -> ProviderResult[AnswerOutput]: ...
 
 
+def provider_for_deal(deal: object) -> AIProvider:
+    """The provider for work on one deal. Demo deals always use the rule-based reader: their fixtures are the
+    ground truth the demo and the eval are built on, the result must not change between visitors, and a demo
+    must never spend the operator's model quota. Real deals use the configured provider."""
+    return get_provider("mock") if getattr(deal, "is_demo", False) else get_provider()
+
+
 def get_provider(name: str | None = None) -> AIProvider:
     settings = get_settings()
     chosen = name or settings.ai_provider

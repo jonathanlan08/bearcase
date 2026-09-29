@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from bearcase import ENGINE_VERSION
 from bearcase.ai.guardrails import apply_guardrails
-from bearcase.ai.provider import AIProvider, ChunkRef, ClaimContext, DocumentContext, get_provider
+from bearcase.ai.provider import AIProvider, ChunkRef, ClaimContext, DocumentContext, get_provider, provider_for_deal
 from bearcase.ai.retrieval import LexicalRetriever
 from bearcase.audit import record
 from bearcase.chat.brief import invalidate_brief
@@ -1688,8 +1688,8 @@ def load_evidence(db: Session, deal: Deal) -> tuple[list[Document], dict[uuid.UU
 
 
 def analyze_deal(db: Session, job: ProcessingJob, jl: JobLog, provider: AIProvider | None = None) -> None:
-    provider = provider or get_provider()
     deal = db.get(Deal, job.deal_id)
+    provider = provider or provider_for_deal(deal)
     if deal is None:
         raise ValueError("deal not found")
     deal.status = DealStatus.PROCESSING
@@ -1743,8 +1743,8 @@ def analyze_deal(db: Session, job: ProcessingJob, jl: JobLog, provider: AIProvid
 def generate_report(
     db: Session, job: ProcessingJob, jl: JobLog, provider: AIProvider | None = None, user_id: uuid.UUID | None = None
 ) -> None:
-    provider = provider or get_provider()
     deal = db.get(Deal, job.deal_id)
+    provider = provider or provider_for_deal(deal)
     if deal is None:
         raise ValueError("deal not found")
     jl.step("Assembling report", 30)
