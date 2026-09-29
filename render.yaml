@@ -47,7 +47,7 @@ services:
       - key: BEARCASE_JOB_RUNNER
         value: thread # jobs run on a worker thread inside the API process; no separate worker service
       - key: BEARCASE_AI_PROVIDER
-        value: mock # extraction stays rule-based; set anthropic plus ANTHROPIC_API_KEY (sync: false) for Claude
+        value: groq # real uploads are read by Groq; demo deals always use the rule-based reader
         # To extract from real uploads on the free tier, change the value above to groq. It reuses GROQ_API_KEY
         # (so the chat and extraction share one quota), defaults to openai/gpt-oss-120b in JSON mode, sends at
         # most 12,000 document characters per request, and answers any call that fails (429 after retries, 5xx,
