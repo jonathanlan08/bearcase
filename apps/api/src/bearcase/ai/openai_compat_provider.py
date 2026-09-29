@@ -241,6 +241,29 @@ def clean_number(value: Any) -> Any:
     return number * _SCALE.get(suffix, 1)
 
 
+_STATED_AMOUNT = re.compile(r"\$?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(thousand|million|billion|mm|bn|k|m)\b", re.IGNORECASE)
+
+
+def restore_stated_scale(value: Any, unit: Any, claim_text: Any) -> Any:
+    """Models often copy "$12.95 million" as 12.95. When a dollar value equals a figure the quoted sentence states
+    with a scale word next to it, return the figure at that scale. This reads the sentence, it does not estimate:
+    a value that matches no stated figure is returned unchanged for validation and verification to judge."""
+    if unit != "usd" or not isinstance(claim_text, str) or not isinstance(value, (int, float, Decimal)):
+        return value
+    try:
+        number = Decimal(str(value))
+    except InvalidOperation:
+        return value
+    for m in _STATED_AMOUNT.finditer(claim_text):
+        try:
+            stated = Decimal(m.group(1).replace(",", ""))
+        except InvalidOperation:
+            continue
+        if stated == number:
+            return number * _SCALE[m.group(2).lower()]
+    return value
+
+
 def parse_extraction(text: str | None) -> tuple[ExtractionOutput | None, str | None, dict[str, Any]]:
     """Extraction is validated claim by claim: one malformed claim is dropped and counted instead of discarding
     every claim in the reply. A reply whose claims all fail is invalid output."""
@@ -256,7 +279,9 @@ def parse_extraction(text: str | None) -> tuple[ExtractionOutput | None, str | N
             continue
         item = prune(item, js, defs)
         if "claimed_value" in item:
-            item["claimed_value"] = clean_number(item["claimed_value"])
+            item["claimed_value"] = restore_stated_scale(
+                clean_number(item["claimed_value"]), item.get("claimed_unit"), item.get("claim_text")
+            )
         try:
             kept.append(ExtractedClaim.model_validate(item))
         except ValidationError as exc:

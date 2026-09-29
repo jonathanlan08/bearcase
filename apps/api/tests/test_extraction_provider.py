@@ -266,7 +266,7 @@ def test_extraction_request_shape_and_valid_output() -> None:
     )
     live, fake = provider(lambda n, kw: reply(json.dumps({"claims": [claim()]})))
     res = live.extract_claims(DocumentContext("x.pdf", "cim", "pdf", [*CHUNKS, hostile]))
-    assert res.ok and res.provider == "groq" and res.model == GROQ_DEFAULT_MODEL and res.prompt_version == "1.0/json-1"
+    assert res.ok and res.provider == "groq" and res.model == GROQ_DEFAULT_MODEL and res.prompt_version == "1.0/json-2"
     assert [c.key for c in res.output.claims] == ["revenue_fy2024"] and str(res.output.claims[0].claimed_value) == "4200000"
     call = fake.calls[0]
     assert call["model"] == GROQ_DEFAULT_MODEL and call["response_format"] == {"type": "json_object"}
@@ -443,7 +443,7 @@ def test_live_extraction_flows_into_claims_and_guardrails_still_apply(db) -> Non
     for c in claims:
         run = db.get(ExtractionRun, c.extraction_run_id)
         assert run is not None and (run.provider, run.model, run.status) == ("groq", GROQ_DEFAULT_MODEL, RunStatus.SUCCEEDED)
-        assert run.prompt_version == "1.0/json-1" and "fallback_from" not in run.usage
+        assert run.prompt_version == "1.0/json-2" and "fallback_from" not in run.usage
         source = db.get(Evidence, c.source_evidence_id)
         assert source is not None and c.claim_text in source.text  # a quotation, from the chunk it cites
     verified = [c for c in claims if c.verification_run_id]
@@ -523,3 +523,17 @@ def test_ask_records_the_provider_that_answered(client, demo, db, monkeypatch) -
     assert q.validation["fallback_from"]["provider"] == "groq" and q.validation["fallback_from"]["reason"].startswith(
         "api_error_503"
     )
+
+
+def test_a_dropped_scale_word_is_restored_from_the_quoted_sentence() -> None:
+    """Seen live from gpt-oss-120b on Groq (2026-09-28): "$12.95 million" came back as 12.95."""
+    from decimal import Decimal
+
+    from bearcase.ai.openai_compat_provider import restore_stated_scale
+
+    text = "The company generated FY2024 revenue of $12.95 million."
+    assert restore_stated_scale(Decimal("12.95"), "usd", text) == Decimal("12950000")
+    assert restore_stated_scale(Decimal("12950000"), "usd", text) == Decimal("12950000")  # already full
+    assert restore_stated_scale(Decimal("850"), "usd", "Rent of $850K a year") == Decimal("850000")
+    assert restore_stated_scale(Decimal("18"), "pct", "grew 18% since 2022") == Decimal("18")  # not money
+    assert restore_stated_scale(Decimal("7.5"), "usd", "revenue of $12.95 million") == Decimal("7.5")  # no match
