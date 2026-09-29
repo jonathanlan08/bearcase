@@ -4,21 +4,20 @@ import { useParams } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Download, RefreshCw } from "lucide-react";
-import { api, type Evidence, type ReportSection } from "@/lib/api";
+import { api, type Evidence } from "@/lib/api";
 import { useEvidence, useJobs, useReport, qk } from "@/components/app/hooks";
 import { useSummary } from "@/components/app/hooks";
 import { ConfidenceLine, SummaryPdfButton } from "../page";
 import { PageHeader, useDealKicker } from "@/components/app/shell";
 import { Button, buttonClass } from "@/components/ui/button";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/primitives";
-import { Table, td, th } from "@/components/ui/table";
-import { StatusChip, StatusGlyph } from "@/components/domain/status";
+import { StatusGlyph } from "@/components/domain/status";
+import { OUTCOME_LABEL, ReportBody, ReportToc, outcomeStatus } from "@/components/domain/report-view";
+import { ReportShareButton } from "@/components/domain/report-share";
 import { DocumentViewer, type ViewerTarget } from "@/components/domain/document-viewer";
 import { StatementKindsLegend } from "@/components/domain/statement-kinds";
 import { fmtDateTime, titleCase } from "@/lib/format";
 import { useToast } from "@/components/ui/toast";
-
-const OUTCOME: Record<string, string> = { additional_diligence_required: "Additional diligence required", material_concerns_identified: "Material concerns identified", assumptions_require_revision: "Assumptions require revision", ready_for_ic_review: "Ready for investment-committee review" };
 
 export default function ReportPage() {
   const { dealId } = useParams<{ dealId: string }>();
@@ -47,12 +46,12 @@ export default function ReportPage() {
         <>
           <SummaryPdfButton dealId={dealId} />
           <Button variant="secondary" size="sm" icon={<RefreshCw size={14} />} onClick={() => generate.mutate()} loading={generate.isPending || running}>{r ? "Regenerate" : "Generate report"}</Button>
-          {r && r.status === "validated" && (<><a className={buttonClass("secondary", "sm")} href={`/api/deals/${dealId}/reports/${r.id}/export?format=md`}><Download size={14} /> Markdown</a><a className={buttonClass("secondary", "sm")} href={`/api/deals/${dealId}/reports/${r.id}/export?format=pdf`}><Download size={14} /> PDF</a></>)}
+          {r && r.status === "validated" && (<><a className={buttonClass("secondary", "sm")} href={`/api/deals/${dealId}/reports/${r.id}/export?format=md`}><Download size={14} /> Markdown</a><a className={buttonClass("secondary", "sm")} href={`/api/deals/${dealId}/reports/${r.id}/export?format=pdf`}><Download size={14} /> PDF</a><ReportShareButton dealId={dealId} reportId={r.id} versionNo={r.version_no} /></>)}
         </>
       }>
         {r && (
           <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-            <span className="inline-flex items-center gap-2 rounded-[var(--radius-1)] border border-hairline px-3 py-1 font-medium"><StatusGlyph status={r.outcome === "ready_for_ic_review" ? "supported" : r.outcome === "material_concerns_identified" ? "contradicted" : "review_required"} />{OUTCOME[r.outcome] ?? titleCase(r.outcome)}</span>
+            <span className="inline-flex items-center gap-2 rounded-[var(--radius-1)] border border-hairline px-3 py-1 font-medium"><StatusGlyph status={outcomeStatus(r.outcome)} />{OUTCOME_LABEL[r.outcome] ?? titleCase(r.outcome)}</span>
             <span className="inline-flex items-center gap-1.5"><StatusGlyph status={r.validation.valid ? "supported" : "contradicted"} size={12} /><span className="num">{r.validation.material_cited}/{r.validation.material_statements}</span> material statements cited</span>
             <span className="text-fg-muted">Version {r.version_no}, {fmtDateTime(r.created_at)}</span>
             <span className="text-xs text-fg-muted">{r.provider}/{r.model}, prompt {r.prompt_version}, schema {r.schema_version}, engine {r.engine_version}</span>
@@ -71,11 +70,7 @@ export default function ReportPage() {
       {report.data === null && <div className="p-6"><EmptyState title="No report yet" body="Generate the investment-committee red-team review from the checked claims, financials, scenarios, and reviewer decisions." action={<Button onClick={() => generate.mutate()} loading={generate.isPending || running}>Generate report</Button>} /></div>}
       {r && (
         <div className="grid gap-6 p-4 md:p-6 lg:grid-cols-[180px_minmax(0,1fr)] 2xl:grid-cols-[180px_minmax(0,1fr)_260px]">
-          <nav aria-label="Report sections" className="lg:sticky lg:top-4 lg:self-start">
-            <label className="text-xs text-fg-muted lg:hidden" htmlFor="report-jump">Jump to section</label>
-            <select id="report-jump" className="mt-1 h-9 w-full rounded-[var(--radius-1)] border border-hairline bg-bg-raised px-2 text-sm lg:hidden" onChange={(e) => document.getElementById(`sec-${e.target.value}`)?.scrollIntoView({ block: "start" })}>{toc.map((t) => <option key={t.key} value={t.key}>{t.title}</option>)}</select>
-            <ol className="hidden flex-col gap-1 text-sm lg:flex">{toc.map((t, i) => <li key={t.key}><a href={`#sec-${t.key}`} className="flex gap-2 rounded-[var(--radius-1)] px-2 py-1 text-fg-muted hover:bg-bg-muted hover:text-fg"><span className="num w-5 shrink-0 text-xs">{String(i + 1).padStart(2, "0")}</span><span className="min-w-0">{t.title}</span></a></li>)}</ol>
-          </nav>
+          <ReportToc sections={toc} />
           <article className="min-w-0 max-w-[76ch]">
             {!r.validation.valid && (
               <div role="alert" className="mb-6 rounded-[var(--radius-3)] border border-red/40 bg-bg-raised p-4 text-sm">
@@ -83,15 +78,7 @@ export default function ReportPage() {
                 <ul className="mt-2 list-disc pl-5 text-fg-muted">{r.validation.uncited.slice(0, 8).map((u, i) => <li key={i}><span className="font-mono text-xs">{u.section}</span>: {u.text}</li>)}</ul>
               </div>
             )}
-            {r.sections.map((s, i) => LEAD_SECTIONS.has(s.key) || i < 2
-              ? <Section key={s.key} s={s} onPeek={setPeek} onOpen={openEvidence} peek={peek} />
-              : (
-                <details key={s.key} id={`sec-${s.key}`} className="mb-4 scroll-mt-4 rounded-[var(--radius-2)] border border-hairline">
-                  <summary className="cursor-pointer list-none px-4 py-3 text-base font-medium [&::-webkit-details-marker]:hidden">{s.title}<span className="ml-2 text-xs font-normal text-fg-muted">{s.statements.length} statement{s.statements.length === 1 ? "" : "s"}{s.table?.rows?.length ? `, ${s.table.rows.length} rows` : ""}</span></summary>
-                  <div className="border-t border-hairline px-4 pb-2"><Section s={{ ...s, key: `${s.key}-body` }} onPeek={setPeek} onOpen={openEvidence} peek={peek} /></div>
-                </details>
-              ))}
-            <p className="mt-2 text-xs text-fg-muted">The first sections are the review. The rest is the ledger behind it; open a section to read it, or use the jump list.</p>
+            <ReportBody sections={r.sections} cite={(kind, id) => <Cite id={id} kind={kind} onPeek={setPeek} onOpen={openEvidence} active={kind === "E" && peek === id} />} />
           </article>
           <aside className="hidden 2xl:sticky 2xl:top-4 2xl:block 2xl:self-start">
             <div className="rounded-[var(--radius-3)] border border-hairline bg-bg-raised p-3 text-sm">
@@ -114,40 +101,8 @@ export default function ReportPage() {
   );
 }
 
-/** Sections shown open: the review itself. Everything else is the ledger behind it and opens on demand. */
-const LEAD_SECTIONS = new Set(["executive_summary", "contradictions", "open_questions", "management_questions", "reviewer_decisions"]);
-
 function Cite({ id, kind, onPeek, onOpen, active }: { id: string; kind: "E" | "M"; onPeek: (id: string | null) => void; onOpen: (id: string) => void; active: boolean }) {
   const label = `${kind}:${id.slice(0, 6)}`;
   if (kind === "M") return <span className="inline-flex h-[18px] items-center rounded-[var(--radius-1)] border border-hairline bg-bg-muted px-1 font-mono text-[10.5px] text-fg-muted" title="Calculation citation: computed by the deterministic engine">{label}</span>;
   return <button type="button" onMouseEnter={() => onPeek(id)} onFocus={() => onPeek(id)} onClick={() => onOpen(id)} aria-pressed={active} className={`inline-flex h-[18px] items-center rounded-[var(--radius-1)] border px-1 font-mono text-[10.5px] ${active ? "border-accent bg-accent/10" : "border-hairline bg-bg-muted hover:border-accent"}`} title="Evidence citation: click to open the document at this spot">{label}</button>;
-}
-
-function Section({ s, onPeek, onOpen, peek }: { s: ReportSection; onPeek: (id: string | null) => void; onOpen: (id: string) => void; peek: string | null }) {
-  return (
-    <section id={`sec-${s.key}`} className="mb-10 scroll-mt-4">
-      <h2 className="text-2xl">{s.title}</h2>
-      {s.derived_from?.length > 0 && <p className="mt-1 text-xs text-fg-muted">Analysis derived from {s.derived_from.join(", ")}</p>}
-      {s.statements.length > 0 && (
-        <ul className="mt-3 flex flex-col gap-2 text-[15px] leading-relaxed">
-          {s.statements.map((st, i) => (
-            <li key={i}>{st.text} <span className="ml-1 inline-flex flex-wrap gap-1 align-middle">{st.evidence_ids.map((e) => <Cite key={e} id={e} kind="E" onPeek={onPeek} onOpen={onOpen} active={peek === e} />)}{st.metric_ids.map((m) => <Cite key={m} id={m} kind="M" onPeek={onPeek} onOpen={onOpen} active={false} />)}</span></li>
-          ))}
-        </ul>
-      )}
-      {s.table?.rows && s.table.rows.length > 0 && (
-        <Table caption={s.title} className="mt-3">
-          <thead><tr>{(s.table.columns ?? []).map((c) => <th key={c} className={th}>{c}</th>)}<th className={th}>Sources</th></tr></thead>
-          <tbody>
-            {s.table.rows.map((row, i) => (
-              <tr key={i}>
-                {row.cells.map((c, j) => <td key={j} className={`${td} ${j > 0 && /^[$\-\d]/.test(String(c)) ? "num text-right" : ""}`}>{["status", "decision", "severity"].some((k) => k in row) && j === 1 ? <StatusChip status={String(row.status ?? row.decision ?? c)} size="sm" /> : String(c)}</td>)}
-                <td className={td}><span className="inline-flex flex-wrap gap-1">{row.evidence_ids.slice(0, 3).map((e) => <Cite key={e} id={e} kind="E" onPeek={onPeek} onOpen={onOpen} active={peek === e} />)}{(row.metric_ids ?? []).slice(0, 2).map((m) => <Cite key={m} id={m} kind="M" onPeek={onPeek} onOpen={onOpen} active={false} />)}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      )}
-    </section>
-  );
 }

@@ -181,7 +181,32 @@ export const members = {
   accept: (token: string) => api.post<{ deal_id: string }>("/api/invites/accept", { token }),
 };
 
-export type ReplyOutcome = "answered" | "dodged" | "needs_document";
+/* ---------- Read-only report links (api/routes/report_shares.py) ---------- */
+
+/** A share link as editors see it; the token never comes back after creation. */
+export interface ReportShare { id: string; report_id: string; created_at: string; expires_at: string | null; revoked_at: string | null; created_by: string | null; active: boolean }
+/** The create response: `path` is `/r/{token}` and is returned this once only. */
+export interface ReportShareCreated extends ReportShare { path: string; url: string }
+export interface SharedEvidence { document_name: string; locator: string; snippet: string }
+export interface SharedMetric { label: string; period: string | null; formula: string | null }
+export interface SharedRow { label: string; cells: string[]; evidence_ids: string[]; metric_ids: string[]; status: string | null; decision: string | null; severity: string | null }
+export interface SharedSection { key: string; title: string; kind: string; statements: Array<{ text: string; role: string | null; evidence_ids: string[]; metric_ids: string[] }>; table: { columns: string[]; rows: SharedRow[] }; derived_from: string[] }
+/** What a share link reveals: the report, its citations resolved to a source, the company name, and whether it is fictional. */
+export interface SharedReport {
+  company_name: string; is_demo: boolean; version_no: number; generated_at: string; outcome: string;
+  validation: { valid: boolean; material_statements: number; material_cited: number };
+  provenance: Record<string, string>; sections: SharedSection[];
+  evidence: Record<string, SharedEvidence>; metrics: Record<string, SharedMetric>;
+}
+export const reportShares = {
+  list: (dealId: string, reportId: string) => api.get<ReportShare[]>(`/api/deals/${dealId}/reports/${reportId}/shares`),
+  create: (dealId: string, reportId: string, expiresInDays: number | null) => api.post<ReportShareCreated>(`/api/deals/${dealId}/reports/${reportId}/share`, { expires_in_days: expiresInDays }),
+  revoke: (dealId: string, reportId: string, shareId: string) => api.del(`/api/deals/${dealId}/reports/${reportId}/shares/${shareId}`),
+  /** Public: no session. */
+  read: (token: string) => api.get<SharedReport>(`/api/shared/reports/${encodeURIComponent(token)}`),
+};
+
+export type ReplyOutcome ="answered" | "dodged" | "needs_document";
 export interface SellerReply { id: string; question_id: string; reply_text: string; outcome: ReplyOutcome; by: string | null; created_at: string }
 export interface SellerReplies { replies: Record<string, SellerReply>; totals: Record<ReplyOutcome, number> }
 export const sellerReplies = {

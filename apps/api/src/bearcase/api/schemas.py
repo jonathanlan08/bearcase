@@ -533,3 +533,90 @@ class HealthOut(BaseModel):
     model: str
     database: str
     storage: str
+
+
+# ---- report share links -----------------------------------------------------------------------------------
+
+
+class ReportShareCreate(BaseModel):
+    """Optional lifetime; without one the link works until it is revoked."""
+
+    expires_in_days: int | None = Field(default=None, ge=1, le=365)
+
+
+class ReportShareOut(Out):
+    """A share link as the deal's editors see it. The token is never part of this shape."""
+
+    id: uuid.UUID
+    report_id: uuid.UUID
+    created_at: datetime
+    expires_at: datetime | None
+    revoked_at: datetime | None
+    created_by: str | None = None
+    active: bool = True
+
+
+class ReportShareCreated(ReportShareOut):
+    """The create response: the only time the link's path (and so its token) is returned."""
+
+    path: str
+    url: str
+
+
+class SharedEvidence(BaseModel):
+    document_name: str
+    locator: str
+    snippet: str
+
+
+class SharedMetric(BaseModel):
+    label: str
+    period: str | None = None
+    formula: str | None = None
+
+
+class SharedStatement(BaseModel):
+    text: str
+    role: str | None = None
+    evidence_ids: list[str] = []
+    metric_ids: list[str] = []
+
+
+class SharedRow(BaseModel):
+    label: str = ""
+    cells: list[str] = []
+    evidence_ids: list[str] = []
+    metric_ids: list[str] = []
+    status: str | None = None
+    decision: str | None = None
+    severity: str | None = None
+
+
+class SharedTable(BaseModel):
+    columns: list[str] = []
+    rows: list[SharedRow] = []
+
+
+class SharedSection(BaseModel):
+    key: str
+    title: str
+    kind: str = "narrative"
+    statements: list[SharedStatement] = []
+    table: SharedTable = SharedTable()
+    derived_from: list[str] = []
+
+
+class SharedReportOut(Out):
+    """What a share link reveals: the report's own content, its citations resolved to a document, a location, and a
+    short passage, the company name, and whether the deal is fictional. Nothing else about the deal."""
+
+    company_name: str
+    is_demo: bool
+    version_no: int
+    generated_at: datetime
+    outcome: str
+    validation: dict[str, Any]
+    provenance: dict[str, str]
+    sections: list[SharedSection]
+    evidence: dict[str, SharedEvidence]
+    metrics: dict[str, SharedMetric]
