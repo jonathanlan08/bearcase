@@ -1,4 +1,5 @@
-"""Domain model. Twenty-four tables; every deal-owned row is reached through Deal.owner_id or an accepted deal_members row."""
+"""Domain model. Every deal-owned row is reached through Deal.owner_id or an accepted deal_members row; the one
+exception is a report_shares bearer link, which reads a single validated report and nothing else."""
 
 from __future__ import annotations
 
@@ -508,6 +509,21 @@ class ReportCitation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     resolved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     report: Mapped[Report] = relationship(back_populates="citations")
+
+
+class ReportShare(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A read-only bearer link to one validated report. Only the SHA-256 of the random token is stored; the token
+    travels once, in the create response. Revoking sets revoked_at; the row stays for the audit history."""
+
+    __tablename__ = "report_shares"
+    report_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("reports.id", ondelete="CASCADE"), index=True)
+    deal_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), index=True)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    report: Mapped[Report] = relationship()
 
 
 class ReviewDecision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
