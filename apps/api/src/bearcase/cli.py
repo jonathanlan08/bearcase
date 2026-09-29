@@ -287,6 +287,25 @@ def doctor_rows() -> list[DoctorRow]:
                     "extraction", "fail", f"Anthropic Claude · {s.ai_model}, but no ANTHROPIC_API_KEY; processing would fail"
                 )
             )
+    elif s.ai_provider in ("groq", "openai_compat"):
+        from bearcase.ai.openai_compat_provider import resolve_extraction_backend
+
+        ext = resolve_extraction_backend(s)  # label and model id only; never a key
+        fallback = "the rule-based provider answers any call that fails" if s.ai_fallback_to_mock else "no fallback"
+        if ext.ready:
+            detail = f"{ext.label} · {ext.model}; JSON mode, {s.ai_request_chars:,} characters per request; {fallback}"
+            if ext.free_tier:
+                detail += "; free tier: every user of this deployment shares one quota with the chat"
+            rows.append(DoctorRow("extraction", "ok", detail))
+        else:
+            rows.append(
+                DoctorRow(
+                    "extraction",
+                    "fail",
+                    f"{ext.label} · {ext.model or 'no model'}, but {ext.reason}; "
+                    + ("every call would fall back to rules-v1" if s.ai_fallback_to_mock else "processing would fail"),
+                )
+            )
     else:
         rows.append(DoctorRow("extraction", "ok", "Rule-based mock (rules-v1); no key needed"))
 

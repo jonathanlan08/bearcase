@@ -55,12 +55,12 @@ from bearcase.models.enums import (
     LinkRole,
     MetricSource,
     ReportStatus,
-    RunStatus,
     RunType,
     ScenarioKind,
     Severity,
 )
 from bearcase.pipeline.jobs import JobLog
+from bearcase.pipeline.runs import record_run
 from bearcase.reports.assemble import DOC_TYPE_LABELS, assemble_report
 
 NARRATIVE_TYPES = {DocumentType.CIM, DocumentType.DEBT_TERM_SHEET, DocumentType.CUSTOMER_CONTRACT, DocumentType.ACQUISITION_MODEL}
@@ -733,25 +733,8 @@ def build_deal_metrics(db: Session, deal: Deal, periods: dict[str, FinancialPeri
 
 
 def _run(db: Session, deal: Deal, doc: Document | None, run_type: RunType, provider: AIProvider, res: Any) -> ExtractionRun:
-    run = ExtractionRun(
-        deal_id=deal.id,
-        document_id=doc.id if doc else None,
-        run_type=run_type,
-        status=RunStatus.SUCCEEDED
-        if res.ok
-        else (RunStatus.INVALID_OUTPUT if (res.error or "").startswith("invalid_output") else RunStatus.FAILED),
-        provider=provider.name,
-        model=provider.model,
-        prompt_version=res.prompt_version,
-        schema_version=res.schema_version,
-        input_hash=res.input_hash,
-        raw_output=res.raw,
-        usage=res.usage,
-        error=res.error,
-    )
-    db.add(run)
-    db.flush()
-    return run
+    # Stamped with the provider that produced the result; a hybrid fallback also records the failed live run.
+    return record_run(db, deal_id=deal.id, document_id=doc.id if doc else None, run_type=run_type, provider=provider, res=res)
 
 
 def extract_claims(
@@ -1016,7 +999,9 @@ def verify_claims(
                     )
                 else:
                     out = res.output
-                    valid = [j for j in out.evidence if j.chunk_index < len(candidates_src)]
+                    # Only chunks the provider was given can be cited; anything else never reaches the guardrails.
+                    provided = {c.index for c in candidates}
+                    valid = [j for j in out.evidence if j.chunk_index in provided]
                     sup = sum(1 for j in valid if j.role == "supporting")
                     con = sum(1 for j in valid if j.role == "contradicting")
                     g = apply_guardrails(out.status, sup, con, out.confidence)
@@ -1740,14 +1725,16 @@ def analyze_deal(db: Session, job: ProcessingJob, jl: JobLog, provider: AIProvid
     jl.step("Recording findings", 92, scenario_error=scenario_error)
     build_findings(db, deal, docs, ev)
     deal.status = DealStatus.VERIFIED
+    fallbacks = int(getattr(provider, "fallback_count", 0))
     record(
         db,
         deal_id=deal.id,
         event_type="deal.analyzed",
         object_type="deal",
         object_id=deal.id,
-        summary=f"Analysis completed with {provider.name}/{provider.model}",
-        payload={"documents": len(docs), "scenario_error": scenario_error, "job_id": str(job.id)},
+        summary=f"Analysis completed with {provider.name}/{provider.model}"
+        + (f"; {fallbacks} call{'s' if fallbacks != 1 else ''} answered by the rule-based fallback" if fallbacks else ""),
+        payload={"documents": len(docs), "scenario_error": scenario_error, "job_id": str(job.id), "fallbacks": fallbacks},
     )
     db.commit()
     invalidate_brief(deal.id)

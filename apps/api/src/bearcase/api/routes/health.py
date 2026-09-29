@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from sqlalchemy import text
 
 from bearcase import ENGINE_VERSION, __version__
+from bearcase.ai.provider import configured_extraction
 from bearcase.api.deps import DbDep
 from bearcase.api.schemas import HealthOut
 from bearcase.config import get_settings
@@ -26,8 +27,8 @@ def health(db: DbDep) -> HealthOut:
         status="ok",
         version=__version__,
         engine_version=ENGINE_VERSION,
-        provider=s.ai_provider,
-        model=s.ai_model if s.ai_provider == "anthropic" else "rules-v1",
+        provider=configured_extraction(s)[0],
+        model=configured_extraction(s)[1],
         database="sqlite" if s.is_sqlite else "postgresql",
         storage=s.storage_backend,
     )

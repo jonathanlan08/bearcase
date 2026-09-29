@@ -48,6 +48,15 @@ services:
         value: thread # jobs run on a worker thread inside the API process; no separate worker service
       - key: BEARCASE_AI_PROVIDER
         value: mock # extraction stays rule-based; set anthropic plus ANTHROPIC_API_KEY (sync: false) for Claude
+        # To extract from real uploads on the free tier, change the value above to groq. It reuses GROQ_API_KEY
+        # (so the chat and extraction share one quota), defaults to openai/gpt-oss-120b in JSON mode, sends at
+        # most 12,000 document characters per request, and answers any call that fails (429 after retries, 5xx,
+        # timeout, invalid JSON) with the rule-based provider, recording both runs. `bearcase doctor` then shows
+        # "extraction: Groq · openai/gpt-oss-120b" and fails at start if the key is missing. Optional overrides:
+        # - key: BEARCASE_AI_EXTRACTION_MODEL
+        #   value: openai/gpt-oss-120b
+        # - key: BEARCASE_AI_REQUEST_CHARS
+        #   value: "12000"
       - key: BEARCASE_TRUST_PROXY_HEADERS
         value: "true" # Render's proxy appends the client address to X-Forwarded-For; the limiter reads the last hop
       # Uploads. The local backend writes to this instance's disk, which Render replaces on every deploy: the

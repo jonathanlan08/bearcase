@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from bearcase.ai.provider import get_provider
+from bearcase.ai.provider import fallback_note, get_provider, result_origin
 from bearcase.api.deps import DbDep, DealDep, UserDep
 from bearcase.api.schemas import Out
 from bearcase.audit import record
@@ -98,6 +98,10 @@ def ask(deal: DealDep, body: AskRequest, db: DbDep, user: UserDep) -> QuestionOu
         dropped = len(bad)
         validation = validate_sections([{"key": "answer", "statements": statements, "derived_from": []}], ev_ids, me_ids)
         validation["dropped_uncited"] = dropped
+    answered_by, answered_model = result_origin(provider, res)
+    fallback = fallback_note(res)
+    if fallback:
+        validation["fallback_from"] = fallback  # the live call failed; the rule-based provider answered
     q = DealQuestion(
         deal_id=deal.id,
         user_id=user.id,
@@ -106,8 +110,8 @@ def ask(deal: DealDep, body: AskRequest, db: DbDep, user: UserDep) -> QuestionOu
         statements=statements,
         grounded=bool(validation["valid"] and statements and dropped == 0),
         validation=validation,
-        provider=provider.name,
-        model=provider.model,
+        provider=answered_by,
+        model=answered_model,
         prompt_version=res.prompt_version or "n/a",
         schema_version=SCHEMA_VERSION,
         input_hash=res.input_hash,
@@ -128,7 +132,8 @@ def ask(deal: DealDep, body: AskRequest, db: DbDep, user: UserDep) -> QuestionOu
             "grounded": q.grounded,
             "statements": len(statements),
             "dropped_uncited": dropped,
-            "provider": provider.name,
+            "provider": answered_by,
+            **({"fallback_from": fallback["provider"]} if fallback else {}),
         },
     )
     db.commit()
