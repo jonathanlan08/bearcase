@@ -170,3 +170,8 @@ None of this exists yet; `SECURITY.md` has the full list of gaps, these are the 
 - Ingress body-size limits, parser CPU and memory bounds, a CSRF token, a dependency CVE scan in CI, and an external penetration test.
 - Cost control beyond the per-user monthly answer count (`BEARCASE_CHAT_MONTHLY_REQUEST_LIMIT`): a per-customer key or a spend cap in currency, so one tenant's chat cannot exhaust the operator's provider quota within the month.
 - Invoicing, refunds, and subscriptions: Stripe Checkout takes the per-deal pilot fee and the webhook records it; nothing else about money is automated.
+
+## Error tracking and analytics (optional, free)
+
+- **Sentry (API errors).** Create a project on Sentry's free Developer plan (Python / FastAPI) and set `SENTRY_DSN` on the Render service. Without it nothing is sent. `bearcase/observability.py` turns off request bodies, default PII, stack-frame locals, and performance tracing, so document text and provider keys never leave the server and the free quota goes to errors.
+- **Vercel Web Analytics (page views).** The web app renders `@vercel/analytics`; enable Web Analytics on the Vercel project (Analytics tab). It is cookieless and a no-op outside Vercel.

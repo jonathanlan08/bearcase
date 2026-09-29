@@ -36,6 +36,7 @@ from bearcase.api.routes import (
 from bearcase.chat.providers import effective_backend
 from bearcase.config import get_settings
 from bearcase.demo_pool import refill_demo_pool
+from bearcase.observability import init_sentry
 
 log = logging.getLogger("bearcase")
 API_ROOT = Path(__file__).resolve().parents[3]
@@ -75,6 +76,7 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
 
 
 def create_app() -> FastAPI:
+    init_sentry()  # no-op unless SENTRY_DSN is set
     settings = get_settings()
     app = FastAPI(
         title="BearCase AI API",

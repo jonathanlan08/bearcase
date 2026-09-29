@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { SiteNav, SiteFooter } from "@/components/landing/chrome";
+import { DemoVideo } from "@/components/landing/demo-video";
 import { Hero } from "@/components/landing/hero";
 import { ClaimEvidenceFigure } from "@/components/landing/figures";
 import { PilotOffer } from "@/components/landing/pilot-offer";
@@ -45,7 +46,16 @@ export default function LandingPage() {
       <main id="main">
         <Hero />
 
-
+        {/* The product in 25 seconds, for visitors who never open the demo. */}
+        <section className="content-auto border-t border-hairline" aria-labelledby="demo-video-heading">
+          <div className="mx-auto grid max-w-[1200px] gap-10 px-6 py-24 md:grid-cols-12 md:py-32 lg:px-10">
+            <div className="md:col-span-4">
+              <h2 id="demo-video-heading" className="text-3xl md:text-4xl">See it work.</h2>
+              <p className="mt-4 text-[17px] leading-relaxed text-fg-muted">The seller says 18% growth. The statements say 11.6%. BearCase shows the source and writes the question.</p>
+            </div>
+            <div className="md:col-span-8"><DemoVideo /></div>
+          </div>
+        </section>
 
         {/* 1. Split: claim and its evidence */}
         <section className="content-auto border-t border-hairline">

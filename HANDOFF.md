@@ -98,3 +98,9 @@ Phase 7 partition: `api/routes/demo.py` + `auth.py` (isolation), `ingest/validat
 - Spare demo pool (`bearcase/demo_pool.py`, setting `BEARCASE_DEMO_POOL_SIZE`, default 1, 0 in tests): a finished Northstar identity is kept ready (`spare-` address, no session). A new visitor to `/api/demo/session` claims it (`claim_spare_demo`, row locked with SKIP LOCKED) and a background task builds the replacement; the API also fills the pool at startup. Tests in `tests/test_demo_pool.py`.
 - `GET /api/ping`: liveness without a database query, so an external ping wakes Render without keeping Neon awake.
 - `.github/workflows/keep-warm.yml` pings it every 10 minutes (about 744 of Render's 750 free hours a month). GitHub pauses scheduled workflows after 60 days of repository inactivity.
+
+## 2026-09-28: demo recording, analytics, error tracking
+
+- Landing page: a "See it work." section after the hero plays a 25-second recording of the live demo (`apps/web/public/demo/bearcase-demo.webm`, 2.3 MB, poster jpg 130 KB). `components/landing/demo-video.tsx` fetches the video only when the frame is on screen, plays muted and looped while visible, pauses off screen, and shows the poster with controls under reduced motion. Re-record with Playwright against the live site when the UI changes.
+- Vercel Web Analytics: `<Analytics />` in `app/layout.tsx`; enable it in the Vercel project's Analytics tab.
+- Sentry: `sentry-sdk[fastapi]`, `bearcase/observability.py`, called first in `create_app()`; off unless `SENTRY_DSN` is set. Uses Sentry's free Developer plan on purpose; the user is keeping the GitHub Student Pack offers for a future startup.
